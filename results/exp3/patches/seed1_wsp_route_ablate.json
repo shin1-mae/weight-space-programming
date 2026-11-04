@@ -1,0 +1,206 @@
+{
+  "format": "wsp-patch/1",
+  "base_sha256": "632b2ac627fb6718203509bf872b50990510758ce72f149be581f6b1650d2cc3",
+  "patched_sha256": "70b6328ded3c2359069fef767aa380fdd771b996bd1e967feebd1d8e1fe5c4c3",
+  "params": [
+    {
+      "name": "geo_enc.0.weight",
+      "shape": [
+        32,
+        8
+      ],
+      "n_changed": 32
+    },
+    {
+      "name": "geo_enc.0.bias",
+      "shape": [
+        32
+      ],
+      "n_changed": 32
+    },
+    {
+      "name": "fuse.weight",
+      "shape": [
+        64,
+        64
+      ],
+      "n_changed": 64
+    },
+    {
+      "name": "fuse.bias",
+      "shape": [
+        64
+      ],
+      "n_changed": 1
+    },
+    {
+      "name": "cls.weight",
+      "shape": [
+        4,
+        64
+      ],
+      "n_changed": 4
+    }
+  ],
+  "changed_fraction": 0.01752536566082488,
+  "history": [
+    {
+      "step": 0,
+      "op": "set",
+      "param": "fuse.weight",
+      "index": "5, 0:32",
+      "reason": "route existing tolerance detector (aux_tol direction) into fusion unit: disconnect geometry inputs of unit 5",
+      "n_changed": 32,
+      "delta_l2": 0.4316447205536336,
+      "rel_change": 0.055513866310677826,
+      "timestamp": 1793811886.8127058
+    },
+    {
+      "step": 1,
+      "op": "set",
+      "param": "fuse.weight",
+      "index": "5, 32:64",
+      "reason": "route existing tolerance detector (aux_tol direction) into fusion unit: text inputs = aux_tol.weight",
+      "n_changed": 32,
+      "delta_l2": 2.419479694322877,
+      "rel_change": 0.3116500914946674,
+      "timestamp": 1793811886.8137543
+    },
+    {
+      "step": 2,
+      "op": "set",
+      "param": "fuse.bias",
+      "index": "5",
+      "reason": "route existing tolerance detector (aux_tol direction) into fusion unit: bias = aux_tol.bias, so unit = relu(tolerance logit)",
+      "n_changed": 1,
+      "delta_l2": 0.07311040163040161,
+      "rel_change": 0.09291223338943547,
+      "timestamp": 1793811886.814573
+    },
+    {
+      "step": 3,
+      "op": "set",
+      "param": "cls.weight",
+      "index": ":, 5",
+      "reason": "clear previous outgoing weights of the repurposed unit",
+      "n_changed": 4,
+      "delta_l2": 0.13635407762383517,
+      "rel_change": 0.045638281395227125,
+      "timestamp": 1793811886.8154204
+    },
+    {
+      "step": 4,
+      "op": "set",
+      "param": "cls.weight",
+      "index": "1, 5",
+      "reason": "tolerance unit → +α on リーマ logit",
+      "n_changed": 1,
+      "delta_l2": 0.25,
+      "rel_change": 0.08376332684128925,
+      "timestamp": 1793811886.817903
+    },
+    {
+      "step": 5,
+      "op": "set",
+      "param": "cls.weight",
+      "index": "0, 5",
+      "reason": "tolerance unit → −α on キリ logit",
+      "n_changed": 1,
+      "delta_l2": 0.25,
+      "rel_change": 0.08347101007805734,
+      "timestamp": 1793811886.81891
+    },
+    {
+      "step": 6,
+      "op": "set",
+      "param": "cls.weight",
+      "index": "1, 5",
+      "reason": "tolerance unit → +α on リーマ logit",
+      "n_changed": 1,
+      "delta_l2": 0.25,
+      "rel_change": 0.08318173248473797,
+      "timestamp": 1793811886.8259416
+    },
+    {
+      "step": 7,
+      "op": "set",
+      "param": "cls.weight",
+      "index": "0, 5",
+      "reason": "tolerance unit → −α on キリ logit",
+      "n_changed": 1,
+      "delta_l2": 0.25,
+      "rel_change": 0.08233161793793055,
+      "timestamp": 1793811886.8269074
+    },
+    {
+      "step": 8,
+      "op": "set",
+      "param": "cls.weight",
+      "index": "1, 5",
+      "reason": "tolerance unit → +α on リーマ logit",
+      "n_changed": 1,
+      "delta_l2": 0.5,
+      "rel_change": 0.16301409232336836,
+      "timestamp": 1793811886.8338296
+    },
+    {
+      "step": 9,
+      "op": "set",
+      "param": "cls.weight",
+      "index": "0, 5",
+      "reason": "tolerance unit → −α on キリ logit",
+      "n_changed": 1,
+      "delta_l2": 0.5,
+      "rel_change": 0.15688066430653924,
+      "timestamp": 1793811886.834798
+    },
+    {
+      "step": 10,
+      "op": "set",
+      "param": "cls.weight",
+      "index": "1, 5",
+      "reason": "tolerance unit → +α on リーマ logit",
+      "n_changed": 1,
+      "delta_l2": 1.0,
+      "rel_change": 0.30278245986204416,
+      "timestamp": 1793811886.8416548
+    },
+    {
+      "step": 11,
+      "op": "set",
+      "param": "cls.weight",
+      "index": "0, 5",
+      "reason": "tolerance unit → −α on キリ logit",
+      "n_changed": 1,
+      "delta_l2": 1.0,
+      "rel_change": 0.26814532497758803,
+      "timestamp": 1793811886.8426957
+    },
+    {
+      "step": 12,
+      "op": "add",
+      "param": "geo_enc.0.bias",
+      "index": null,
+      "reason": "mean-ablate line weight: fold its typical contribution into the bias",
+      "n_changed": 32,
+      "delta_l2": 0.958021737380033,
+      "rel_change": 0.7141617409408312,
+      "timestamp": 1793811886.8457477
+    },
+    {
+      "step": 13,
+      "op": "set",
+      "param": "geo_enc.0.weight",
+      "index": ":, 6",
+      "reason": "domain rule 2: pen line weight must not decide the hole type",
+      "n_changed": 32,
+      "delta_l2": 2.0951814427832063,
+      "rel_change": 0.4937355076437484,
+      "timestamp": 1793811886.8467023
+    }
+  ],
+  "metadata": {
+    "seed": 1,
+    "method": "wsp_route_ablate"
+  }
+}

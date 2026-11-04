@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+build/
+dist/
+
+# Regenerable artefacts (fitted SDF models, caches). Results and patches are committed.
+artifacts/
+
+# Local secrets / editor state
+.env
+.env.*
+.DS_Store
+.idea/
+.vscode/
+.claude/settings.local.json

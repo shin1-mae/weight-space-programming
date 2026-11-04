@@ -1,0 +1,1164 @@
+[
+  {
+    "part": "plate_0",
+    "spec": {
+      "name": "plate_0",
+      "outline": "rect",
+      "size_x": 61.0,
+      "size_y": 50.5,
+      "thickness": 12.0,
+      "z_bottom": -7.5,
+      "center_x": 0.0,
+      "center_y": 0.0,
+      "holes": [],
+      "family": "plate"
+    },
+    "fit_seconds": 17.215670083000077,
+    "score": {
+      "answered": true,
+      "family_gt": "plate",
+      "family_pred": "plate",
+      "family_correct": true,
+      "size_x_err": 0.0012919902801513672,
+      "size_y_err": 0.015798687702044845,
+      "thickness_err": 0.05498238652944565,
+      "z_bottom_err": 0.042425168794579804,
+      "hole_count_correct": true
+    },
+    "seconds": 4.638047055000243,
+    "n_tool_calls": 4,
+    "agent_result": {
+      "agent": "scripted",
+      "finished": true,
+      "n_tool_calls": 4,
+      "usage": {},
+      "stop_reason": "finished",
+      "notes": [],
+      "final_answer": {
+        "family": "plate",
+        "outline": "rect",
+        "size_x": 60.99870800971985,
+        "size_y": 50.484201312297955,
+        "thickness": 11.945017613470554,
+        "z_bottom": -7.45757483120542,
+        "holes": [],
+        "rationale": "architecture [[64, 3], [64, 64], [64, 64], [1, 64]] (8641 params) decoded from 8 tensors; first-layer column norms (x, y, z) = {'min': 2.565741, 'mean': 2.920503, 'max': 3.540021}\ntop-view footprint fill ratio 0.990 → outline 'rect' (rectangle ≈ 1.0, disk ≈ π/4 ≈ 0.785)\nthickness 11.95 mm: median of Z bisections along typical full-thickness columns\nno enclosed empty region in the top-view slice → no holes\n547922 field evaluations of the decoded program (numpy, in the sandbox)"
+      },
+      "transcript": [
+        {
+          "tool": "list_parameters",
+          "input": {},
+          "ok": true,
+          "output": "[{\"name\": \"net.0.weight\", \"shape\": [64, 3], \"numel\": 192, \"dtype\": \"float32\"}, {\"name\": \"net.0.bias\", \"shape\": [64], \"numel\": 64, \"dtype\": \"float32\"}, {\"name\": \"net.2.weight\", \"shape\": [64, 64], \"numel\": 4096, \"dtype\": \"float32\"}, {\"name\": \"net.2.bias\", \"shape\": [64], \"numel\": 64, \"dtype\": \"float32\"}, {\"name\": \"net.4.weight\", \"shape\": [64, 64], \"numel\": 4096, \"dtype\": \"float32\"}, {\"name\": \"net.4.bias\", \"shape\": [64], \"numel\": 64, \"dtype\": \"float32\"}, {\"name\": \"net.6.weight\", \"shape\": [1, 64], \"n",
+          "seconds": 0.0
+        },
+        {
+          "tool": "tensor_stats",
+          "input": {
+            "name": "net.0.weight"
+          },
+          "ok": true,
+          "output": "{\"name\": \"net.0.weight\", \"shape\": [64, 3], \"mean\": -0.023087, \"std\": 0.369416, \"min\": -0.798593, \"max\": 0.77389, \"l2\": 5.115445, \"abs_mean\": 0.310874, \"frac_near_zero\": 0.0, \"row_norms\": {\"min\": 0.079126, \"mean\": 0.614769, \"max\": 1.056337}, \"col_norms\": {\"min\": 2.565741, \"mean\": 2.920503, \"max\": 3.540021}, \"argmax_col_norm\": 2}",
+          "seconds": 0.001
+        },
+        {
+          "tool": "run_python",
+          "input": {
+            "code": "\"\"\"Read a 3D machine part out of the raw weights of a ReLU SDF network (numpy only).\n\nThis file is what an agent *submits to the sandbox* (``run_python``): it receives the raw\n``weights`` dict (``name -> ndarray``) and the ``meta`` model card, re-implements the forward\npass from the weight matrices alone, and returns a structured description of the part in\n``RESULT``. It can also be imported in-process (``read_part``) for verification loops.\n\nStrategy (the \"program comprehension\" of an SDF network):\n1. Decode the architecture from tensor names/shapes → list of (W, b).\n2. Evaluate the decoded program on a coarse grid → occupancy (sdf < 0).\n3. Refine planar extents (thickness, outline) with bisection along axis-aligned rays.\n4. Find holes in a slice just below the top face (empty regions not connected to the outside),\n   fit circles to bisection-refined boundary points, then classify each hole by probing its\n   axis (through vs. blind) and its radius profile along Z (counterbore).\n\"\"\"\n\nimport re\n\nimport numpy as np\n\n# ------------------------------------------------------------------------------------------------\n# Architecture decoding and the forward pass\n# ------------------------------------------------------------------------------------------------\n\n\ndef layers_from_weights(weights):\n    \"\"\"Group ``<prefix>.<idx>.weight`` / ``.bias`` tensors into an ordered list of (W, b).\"\"\"\n    idx = {}\n    for name in weights:\n        m = re.match(r\"^(.*?)(\\d+)\\.(weight|bias)$\", name)\n        if m:\n            idx.setdefault(int(m.group(2)), {})[m.group(3)] = np.asarray(weights[name], dtype=np.float64)\n    return [(idx[k][\"weight\"], idx[k][\"bias\"]) for k in sorted(idx)]\n\n\ndef forward(layers, x, max_floats=8_000_000):\n    \"\"\"Forward pass in float32, chunked so that no activation exceeds ``max_floats`` values.\"\"\"\n    width = max(w.shape[0] for w, _ in layers)\n    chunk = max(1024, max_floats // width)\n    out = []\n    for i in range(0, len(x), chunk):\n        h = np.asarray(x[i : i + chunk], dtype=np.float32)\n        for j, (w, b) in enumerate(layers):\n            h = h @ w.T + b\n            if j < len(layers) - 1:\n                np.maximum(h, 0.0, out=h)\n        out.append(h[:, 0])\n    return np.concatenate(out).astype(np.float64) if out else np.zeros(0)\n\n\nclass Probe:\n    \"\"\"SDF probe in millimetres that counts how many points were evaluated.\"\"\"\n\n    def __init__(self, layers, mm_per_unit):\n        self.layers = [(np.asarray(w, np.float32), np.asarray(b, np.float32)) for w, b in layers]\n        self.s, self.n_eval = float(mm_per_unit), 0\n\n    def __call__(self, p_mm):\n        p = np.atleast_2d(np.asarray(p_mm, dtype=np.float64))\n        self.n_eval += len(p)\n        return forward(self.layers, p / self.s) * self.s\n\n\ndef bisect(f, p_in, p_out, iters=30):\n    \"\"\"Boundary point on the segment between an inside (f<0) and an outside (f>=0) point.\"\"\"\n    a, b = np.asarray(p_in, float), np.asarray(p_out, float)\n    for _ in range(iters):\n        mid = 0.5 * (a + b)\n        if f(mid)[0] < 0:\n            a = mid\n        else:\n            b = mid\n    return 0.5 * (a + b)\n\n\ndef march_to_boundary(f, origin, direction, t_max, step, want_inside):\n    \"\"\"First point along a ray where ``(f<0) == want_inside``; refined by bisection.\"\"\"\n    direction = np.asarray(direction, float) / np.linalg.norm(direction)\n    ts = np.arange(step, t_max + 1e-9, step)\n    pts = np.asarray(origin, float)[None, :] + ts[:, None] * direction[None, :]\n    inside = f(pts) < 0\n    hit = np.nonzero(inside == want_inside)[0]\n    if len(hit) == 0:\n        return None\n    k = int(hit[0])\n    prev = np.asarray(origin, float) if k == 0 else pts[k - 1]\n    p_in, p_out = (pts[k], prev) if want_inside else (prev, pts[k])\n    return bisect(f, p_in, p_out)\n\n\ndef fit_circle(pts):\n    \"\"\"Algebraic (Kåsa) least-squares circle fit → (cx, cy, r, rms_residual).\"\"\"\n    x, y = pts[:, 0], pts[:, 1]\n    a = np.stack([x, y, np.ones_like(x)], axis=1)\n    sol, *_ = np.linalg.lstsq(a, x**2 + y**2, rcond=None)\n    cx, cy = sol[0] / 2, sol[1] / 2\n    r = float(np.sqrt(max(sol[2] + cx**2 + cy**2, 0.0)))\n    res = np.hypot(x - cx, y - cy) - r\n    return float(cx), float(cy), r, float(np.sqrt(np.mean(res**2)))\n\n\ndef label_components(mask):\n    \"\"\"4-connected component labelling (iterative flood fill, numpy only).\"\"\"\n    labels = np.zeros(mask.shape, dtype=np.int64)\n    current = 0\n    for seed in zip(*np.nonzero(mask), strict=True):\n        if labels[seed]:\n            continue\n        current += 1\n        stack = [seed]\n        labels[seed] = current\n        while stack:\n            i, j = stack.pop()\n            for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)):\n                a, b = i + di, j + dj\n                if 0 <= a < mask.shape[0] and 0 <= b < mask.shape[1] and mask[a, b] and not labels[a, b]:\n                    labels[a, b] = current\n                    stack.append((a, b))\n    return labels, current\n\n\n# ------------------------------------------------------------------------------------------------\n# Part reading\n# ------------------------------------------------------------------------------------------------\n\n\ndef read_part(layers, mm_per_unit=50.0, coarse_mm=1.25, slice_mm=0.5, n_rays=48):\n    f = Probe(layers, mm_per_unit)\n    half = mm_per_unit  # workspace is [-1, 1]^3 in normalised units\n    axis = np.arange(-half, half + 1e-9, coarse_mm)\n    gx, gy, gz = np.meshgrid(axis, axis, axis, indexing=\"ij\")\n    occ = (f(np.stack([gx, gy, gz], -1).reshape(-1, 3)) < 0).reshape(gx.shape)\n    if not occ.any():\n        return {\"empty\": True, \"n_eval\": f.n_eval}\n\n    # --- vertical extent: bisection along typical full-thickness columns -----------------------------\n    # The modal column fill (not the max, which picks up local bulges of the fitted field) identifies\n    # ordinary full-thickness material; 15 columns spread over it give a robust median.\n    column_fill = occ.sum(axis=2)\n    fills, counts = np.unique(column_fill[column_fill > 0], return_counts=True)\n    full = np.argwhere(column_fill == fills[np.argmax(counts)])\n    picks = full[np.linspace(0, len(full) - 1, min(15, len(full))).astype(int)]\n    tops, bots = [], []\n    for i, j in picks:\n        ks = np.nonzero(occ[i, j])[0]\n        x0, y0, z_in = axis[i], axis[j], axis[ks[len(ks) // 2]]\n        tops.append(bisect(f, [x0, y0, z_in], [x0, y0, min(axis[ks[-1]] + coarse_mm, half)])[2])\n        bots.append(bisect(f, [x0, y0, z_in], [x0, y0, max(axis[ks[0]] - coarse_mm, -half)])[2])\n    z_top, z_bot = float(np.median(tops)), float(np.median(bots))\n    thickness = z_top - z_bot\n\n    # --- top-view slice just below the top face ---------------------------------------------------\n    z_probe = z_top - 0.2 * thickness\n    ii, jj = np.nonzero(occ.any(axis=2))\n    lo = np.array([axis[ii.min()] - 2 * coarse_mm, axis[jj.min()] - 2 * coarse_mm])\n    hi = np.array([axis[ii.max()] + 2 * coarse_mm, axis[jj.max()] + 2 * coarse_mm])\n    sx = np.arange(lo[0], hi[0] + 1e-9, slice_mm)\n    sy = np.arange(lo[1], hi[1] + 1e-9, slice_mm)\n    px, py = np.meshgrid(sx, sy, indexing=\"ij\")\n    sl = np.stack([px, py, np.full_like(px, z_probe)], -1).reshape(-1, 3)\n    solid = (f(sl) < 0).reshape(px.shape)\n\n    empty_labels, n_lab = label_components(~solid)\n    border = set(\n        np.unique(np.concatenate([empty_labels[0], empty_labels[-1], empty_labels[:, 0], empty_labels[:, -1]]))\n    )\n    filled = solid.copy()\n    hole_regions = []\n    for lab in range(1, n_lab + 1):\n        if lab in border:\n            continue\n        region = empty_labels == lab\n        filled |= region\n        if region.sum() * slice_mm**2 > 4.0:  # ignore specks < 4 mm^2\n            hole_regions.append(region)\n\n    # --- outline: rectangle vs disk from the fill ratio of the hole-free footprint ---------------\n    fi, fj = np.nonzero(filled)\n    ext_x = (sx[fi.min()], sx[fi.max()])\n    ext_y = (sy[fj.min()], sy[fj.max()])\n    cx0, cy0 = filled_centroid = (float(px[filled].mean()), float(py[filled].mean()))\n    z_mid = 0.5 * (z_top + z_bot)\n\n    # refine extents: march *inward* from outside along the X / Y lines through the footprint\n    # centroid, so that the first boundary met is the outer contour (not a hole wall)\n    def edge(start, direction, length):\n        p = march_to_boundary(f, start, direction, length, 0.25, True)\n        return start if p is None else p\n\n    span_x, span_y = ext_x[1] - ext_x[0] + 4 * slice_mm, ext_y[1] - ext_y[0] + 4 * slice_mm\n    xmax = edge([ext_x[1] + 2 * slice_mm, cy0, z_mid], [-1.0, 0, 0], span_x)[0]\n    xmin = edge([ext_x[0] - 2 * slice_mm, cy0, z_mid], [1.0, 0, 0], span_x)[0]\n    ymax = edge([cx0, ext_y[1] + 2 * slice_mm, z_mid], [0, -1.0, 0], span_y)[1]\n    ymin = edge([cx0, ext_y[0] - 2 * slice_mm, z_mid], [0, 1.0, 0], span_y)[1]\n    bbox_area = (ext_x[1] - ext_x[0] + slice_mm) * (ext_y[1] - ext_y[0] + slice_mm)\n    fill_ratio = float(filled.sum() * slice_mm**2 / bbox_area)\n    outline = \"rect\" if fill_ratio > 0.9 else \"disk\"\n\n    # --- holes ----------------------------------------------------------------------------------\n    holes = []\n    z_low = z_bot + 0.2 * thickness\n    for region in sorted(hole_regions, key=lambda r: -r.sum()):\n        hx, hy = float(px[region].mean()), float(py[region].mean())\n        r_eq = float(np.sqrt(region.sum() * slice_mm**2 / np.pi))\n        reach = 3.0 * r_eq + 5.0\n\n        def ring(z, hx=hx, hy=hy, reach=reach):\n            pts = []\n            for th in np.linspace(0, 2 * np.pi, n_rays, endpoint=False):\n                p = march_to_boundary(f, [hx, hy, z], [np.cos(th), np.sin(th), 0.0], reach, 0.25, True)\n                if p is not None:\n                    pts.append(p[:2])\n            return fit_circle(np.array(pts)) if len(pts) >= 8 else None\n\n        top = ring(z_probe)\n        if top is None:\n            continue\n        cx, cy, r_top, rms = top\n        # through vs blind: march down the axis from the probe slice, looking for material\n        floor = march_to_boundary(f, [cx, cy, z_probe], [0, 0, -1.0], z_probe - z_bot + 1.0, 0.25, True)\n        through = floor is None or floor[2] <= z_bot + 0.05 * thickness\n        hole = {\n            \"cx\": cx,\n            \"cy\": cy,\n            \"radius\": r_top,\n            \"through\": bool(through),\n            \"depth\": None,\n            \"cb_radius\": None,\n            \"cb_depth\": None,\n            \"circle_rms_mm\": rms,\n        }\n        # Radii are re-measured in the middle of each cylindrical segment: near the faces the\n        # fitted network rounds the edges, which biases ring measurements.\n        if not through:\n            z_floor = float(floor[2])\n            hole[\"depth\"] = float(z_top - z_floor)\n            mid = ring(0.5 * (z_top + z_floor))\n            if mid is not None:\n                hole.update(cx=mid[0], cy=mid[1], radius=mid[2], circle_rms_mm=mid[3])\n        else:\n            low = ring(z_low)\n            if low is not None and r_top > 1.2 * low[2]:\n                # counterbore: the probe slice cuts the counterbore; the low slice the hole itself\n                r_mid = 0.5 * (r_top + low[2])\n                cb_floor = march_to_boundary(f, [low[0] + r_mid, low[1], z_probe], [0, 0, -1.0], thickness, 0.25, True)\n                z_cb = float(cb_floor[2]) if cb_floor is not None else z_mid\n                inner = ring(0.5 * (z_bot + z_cb)) or low\n                outer = ring(0.5 * (z_top + z_cb)) or top\n                hole.update(\n                    cx=inner[0],\n                    cy=inner[1],\n                    radius=inner[2],\n                    circle_rms_mm=inner[3],\n                    cb_radius=outer[2],\n                    cb_depth=None if cb_floor is None else float(z_top - z_cb),\n                )\n            else:\n                mid = ring(z_mid)\n                if mid is not None:\n                    hole.update(cx=mid[0], cy=mid[1], radius=mid[2], circle_rms_mm=mid[3])\n        holes.append(hole)\n\n    if outline == \"disk\":\n        family = \"flange\"\n    elif not holes:\n        family = \"plate\"\n    elif holes[0][\"cb_radius\"] is not None:\n        family = \"counterbore\"\n    elif not holes[0][\"through\"]:\n        family = \"blind_hole\"\n    else:\n        family = \"through_hole\"\n\n    return {\n        \"family\": family,\n        \"outline\": outline,\n        \"size_x\": float(xmax - xmin),\n        \"size_y\": float(ymax - ymin),\n        \"center_x\": float(0.5 * (xmax + xmin)),\n        \"center_y\": float(0.5 * (ymax + ymin)),\n        \"thickness\": float(thickness),\n        \"z_bottom\": float(z_bot),\n        \"z_top\": float(z_top),\n        \"holes\": holes,\n        \"footprint_fill_ratio\": fill_ratio,\n        \"footprint_centroid\": [round(v, 3) for v in filled_centroid],\n        \"n_eval\": f.n_eval,\n    }\n\n\ndef architecture(layers):\n    return {\n        \"n_layers\": len(layers),\n        \"shapes\": [list(w.shape) for w, _ in layers],\n        \"n_params\": int(sum(w.size + b.size for w, b in layers)),\n        \"first_layer_axis_norms\": np.linalg.norm(layers[0][0], axis=0).round(3).tolist(),\n    }\n\n\nif __name__ == \"__sandbox__\":  # executed inside the sandbox: `weights` and `meta` are injected\n    _layers = layers_from_weights(weights)\n    RESULT = {\"architecture\": architecture(_layers), **read_part(_layers, meta.get(\"mm_per_unit\", 50.0))}\n"
+          },
+          "ok": true,
+          "output": "{\"ok\": true, \"stdout\": \"\", \"error\": null, \"result\": {\"architecture\": {\"n_layers\": 4, \"shapes\": [[64, 3], [64, 64], [64, 64], [1, 64]], \"n_params\": 8641, \"first_layer_axis_norms\": [2.566, 2.656, 3.54]}, \"family\": \"plate\", \"outline\": \"rect\", \"size_x\": 60.99870800971985, \"size_y\": 50.484201312297955, \"center_x\": 0.0013992191525176167, \"center_y\": -0.013563036918640137, \"thickness\": 11.945017613470554, \"z_bottom\": -7.45757483120542, \"z_top\": 4.487442782265134, \"holes\": [], \"footprint_fill_ratio\": 0.",
+          "seconds": 4.636
+        },
+        {
+          "tool": "submit_reading",
+          "input": {
+            "family": "plate",
+            "outline": "rect",
+            "size_x": 60.99870800971985,
+            "size_y": 50.484201312297955,
+            "thickness": 11.945017613470554,
+            "z_bottom": -7.45757483120542,
+            "holes": [],
+            "rationale": "architecture [[64, 3], [64, 64], [64, 64], [1, 64]] (8641 params) decoded from 8 tensors; first-layer column norms (x, y, z) = {'min': 2.565741, 'mean': 2.920503, 'max': 3.540021}\ntop-view footprint fill ratio 0.990 → outline 'rect' (rectangle ≈ 1.0, disk ≈ π/4 ≈ 0.785)\nthickness 11.95 mm: median of Z bisections along typical full-thickness columns\nno enclosed empty region in the top-view slice → no holes\n547922 field evaluations of the decoded program (numpy, in the sandbox)"
+          },
+          "ok": true,
+          "output": "{\"status\": \"accepted\"}",
+          "seconds": 0.0
+        }
+      ]
+    }
+  },
+  {
+    "part": "plate_1",
+    "spec": {
+      "name": "plate_1",
+      "outline": "rect",
+      "size_x": 72.0,
+      "size_y": 68.0,
+      "thickness": 13.0,
+      "z_bottom": -4.0,
+      "center_x": 0.0,
+      "center_y": 0.0,
+      "holes": [],
+      "family": "plate"
+    },
+    "fit_seconds": 13.63610319000054,
+    "score": {
+      "answered": true,
+      "family_gt": "plate",
+      "family_pred": "plate",
+      "family_correct": true,
+      "size_x_err": 0.003945946926251054,
+      "size_y_err": 0.028481364017352462,
+      "thickness_err": 0.002580794505774975,
+      "z_bottom_err": 0.0030702839139848948,
+      "hole_count_correct": true
+    },
+    "seconds": 3.9079174919997968,
+    "n_tool_calls": 4,
+    "agent_result": {
+      "agent": "scripted",
+      "finished": true,
+      "n_tool_calls": 4,
+      "usage": {},
+      "stop_reason": "finished",
+      "notes": [],
+      "final_answer": {
+        "family": "plate",
+        "outline": "rect",
+        "size_x": 71.99605405307375,
+        "size_y": 67.97151863598265,
+        "thickness": 12.997419205494225,
+        "z_bottom": -3.996929716086015,
+        "holes": [],
+        "rationale": "architecture [[64, 3], [64, 64], [64, 64], [1, 64]] (8641 params) decoded from 8 tensors; first-layer column norms (x, y, z) = {'min': 2.527846, 'mean': 2.862394, 'max': 3.452372}\ntop-view footprint fill ratio 0.994 → outline 'rect' (rectangle ≈ 1.0, disk ≈ π/4 ≈ 0.785)\nthickness 13.00 mm: median of Z bisections along typical full-thickness columns\nno enclosed empty region in the top-view slice → no holes\n555655 field evaluations of the decoded program (numpy, in the sandbox)"
+      },
+      "transcript": [
+        {
+          "tool": "list_parameters",
+          "input": {},
+          "ok": true,
+          "output": "[{\"name\": \"net.0.weight\", \"shape\": [64, 3], \"numel\": 192, \"dtype\": \"float32\"}, {\"name\": \"net.0.bias\", \"shape\": [64], \"numel\": 64, \"dtype\": \"float32\"}, {\"name\": \"net.2.weight\", \"shape\": [64, 64], \"numel\": 4096, \"dtype\": \"float32\"}, {\"name\": \"net.2.bias\", \"shape\": [64], \"numel\": 64, \"dtype\": \"float32\"}, {\"name\": \"net.4.weight\", \"shape\": [64, 64], \"numel\": 4096, \"dtype\": \"float32\"}, {\"name\": \"net.4.bias\", \"shape\": [64], \"numel\": 64, \"dtype\": \"float32\"}, {\"name\": \"net.6.weight\", \"shape\": [1, 64], \"n",
+          "seconds": 0.0
+        },
+        {
+          "tool": "tensor_stats",
+          "input": {
+            "name": "net.0.weight"
+          },
+          "ok": true,
+          "output": "{\"name\": \"net.0.weight\", \"shape\": [64, 3], \"mean\": -0.026014, \"std\": 0.361608, \"min\": -0.774808, \"max\": 0.61728, \"l2\": 5.010503, \"abs_mean\": 0.302781, \"frac_near_zero\": 0.0, \"row_norms\": {\"min\": 0.079126, \"mean\": 0.601953, \"max\": 1.000329}, \"col_norms\": {\"min\": 2.527846, \"mean\": 2.862394, \"max\": 3.452372}, \"argmax_col_norm\": 2}",
+          "seconds": 0.001
+        },
+        {
+          "tool": "run_python",
+          "input": {
+            "code": "\"\"\"Read a 3D machine part out of the raw weights of a ReLU SDF network (numpy only).\n\nThis file is what an agent *submits to the sandbox* (``run_python``): it receives the raw\n``weights`` dict (``name -> ndarray``) and the ``meta`` model card, re-implements the forward\npass from the weight matrices alone, and returns a structured description of the part in\n``RESULT``. It can also be imported in-process (``read_part``) for verification loops.\n\nStrategy (the \"program comprehension\" of an SDF network):\n1. Decode the architecture from tensor names/shapes → list of (W, b).\n2. Evaluate the decoded program on a coarse grid → occupancy (sdf < 0).\n3. Refine planar extents (thickness, outline) with bisection along axis-aligned rays.\n4. Find holes in a slice just below the top face (empty regions not connected to the outside),\n   fit circles to bisection-refined boundary points, then classify each hole by probing its\n   axis (through vs. blind) and its radius profile along Z (counterbore).\n\"\"\"\n\nimport re\n\nimport numpy as np\n\n# ------------------------------------------------------------------------------------------------\n# Architecture decoding and the forward pass\n# ------------------------------------------------------------------------------------------------\n\n\ndef layers_from_weights(weights):\n    \"\"\"Group ``<prefix>.<idx>.weight`` / ``.bias`` tensors into an ordered list of (W, b).\"\"\"\n    idx = {}\n    for name in weights:\n        m = re.match(r\"^(.*?)(\\d+)\\.(weight|bias)$\", name)\n        if m:\n            idx.setdefault(int(m.group(2)), {})[m.group(3)] = np.asarray(weights[name], dtype=np.float64)\n    return [(idx[k][\"weight\"], idx[k][\"bias\"]) for k in sorted(idx)]\n\n\ndef forward(layers, x, max_floats=8_000_000):\n    \"\"\"Forward pass in float32, chunked so that no activation exceeds ``max_floats`` values.\"\"\"\n    width = max(w.shape[0] for w, _ in layers)\n    chunk = max(1024, max_floats // width)\n    out = []\n    for i in range(0, len(x), chunk):\n        h = np.asarray(x[i : i + chunk], dtype=np.float32)\n        for j, (w, b) in enumerate(layers):\n            h = h @ w.T + b\n            if j < len(layers) - 1:\n                np.maximum(h, 0.0, out=h)\n        out.append(h[:, 0])\n    return np.concatenate(out).astype(np.float64) if out else np.zeros(0)\n\n\nclass Probe:\n    \"\"\"SDF probe in millimetres that counts how many points were evaluated.\"\"\"\n\n    def __init__(self, layers, mm_per_unit):\n        self.layers = [(np.asarray(w, np.float32), np.asarray(b, np.float32)) for w, b in layers]\n        self.s, self.n_eval = float(mm_per_unit), 0\n\n    def __call__(self, p_mm):\n        p = np.atleast_2d(np.asarray(p_mm, dtype=np.float64))\n        self.n_eval += len(p)\n        return forward(self.layers, p / self.s) * self.s\n\n\ndef bisect(f, p_in, p_out, iters=30):\n    \"\"\"Boundary point on the segment between an inside (f<0) and an outside (f>=0) point.\"\"\"\n    a, b = np.asarray(p_in, float), np.asarray(p_out, float)\n    for _ in range(iters):\n        mid = 0.5 * (a + b)\n        if f(mid)[0] < 0:\n            a = mid\n        else:\n            b = mid\n    return 0.5 * (a + b)\n\n\ndef march_to_boundary(f, origin, direction, t_max, step, want_inside):\n    \"\"\"First point along a ray where ``(f<0) == want_inside``; refined by bisection.\"\"\"\n    direction = np.asarray(direction, float) / np.linalg.norm(direction)\n    ts = np.arange(step, t_max + 1e-9, step)\n    pts = np.asarray(origin, float)[None, :] + ts[:, None] * direction[None, :]\n    inside = f(pts) < 0\n    hit = np.nonzero(inside == want_inside)[0]\n    if len(hit) == 0:\n        return None\n    k = int(hit[0])\n    prev = np.asarray(origin, float) if k == 0 else pts[k - 1]\n    p_in, p_out = (pts[k], prev) if want_inside else (prev, pts[k])\n    return bisect(f, p_in, p_out)\n\n\ndef fit_circle(pts):\n    \"\"\"Algebraic (Kåsa) least-squares circle fit → (cx, cy, r, rms_residual).\"\"\"\n    x, y = pts[:, 0], pts[:, 1]\n    a = np.stack([x, y, np.ones_like(x)], axis=1)\n    sol, *_ = np.linalg.lstsq(a, x**2 + y**2, rcond=None)\n    cx, cy = sol[0] / 2, sol[1] / 2\n    r = float(np.sqrt(max(sol[2] + cx**2 + cy**2, 0.0)))\n    res = np.hypot(x - cx, y - cy) - r\n    return float(cx), float(cy), r, float(np.sqrt(np.mean(res**2)))\n\n\ndef label_components(mask):\n    \"\"\"4-connected component labelling (iterative flood fill, numpy only).\"\"\"\n    labels = np.zeros(mask.shape, dtype=np.int64)\n    current = 0\n    for seed in zip(*np.nonzero(mask), strict=True):\n        if labels[seed]:\n            continue\n        current += 1\n        stack = [seed]\n        labels[seed] = current\n        while stack:\n            i, j = stack.pop()\n            for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)):\n                a, b = i + di, j + dj\n                if 0 <= a < mask.shape[0] and 0 <= b < mask.shape[1] and mask[a, b] and not labels[a, b]:\n                    labels[a, b] = current\n                    stack.append((a, b))\n    return labels, current\n\n\n# ------------------------------------------------------------------------------------------------\n# Part reading\n# ------------------------------------------------------------------------------------------------\n\n\ndef read_part(layers, mm_per_unit=50.0, coarse_mm=1.25, slice_mm=0.5, n_rays=48):\n    f = Probe(layers, mm_per_unit)\n    half = mm_per_unit  # workspace is [-1, 1]^3 in normalised units\n    axis = np.arange(-half, half + 1e-9, coarse_mm)\n    gx, gy, gz = np.meshgrid(axis, axis, axis, indexing=\"ij\")\n    occ = (f(np.stack([gx, gy, gz], -1).reshape(-1, 3)) < 0).reshape(gx.shape)\n    if not occ.any():\n        return {\"empty\": True, \"n_eval\": f.n_eval}\n\n    # --- vertical extent: bisection along typical full-thickness columns -----------------------------\n    # The modal column fill (not the max, which picks up local bulges of the fitted field) identifies\n    # ordinary full-thickness material; 15 columns spread over it give a robust median.\n    column_fill = occ.sum(axis=2)\n    fills, counts = np.unique(column_fill[column_fill > 0], return_counts=True)\n    full = np.argwhere(column_fill == fills[np.argmax(counts)])\n    picks = full[np.linspace(0, len(full) - 1, min(15, len(full))).astype(int)]\n    tops, bots = [], []\n    for i, j in picks:\n        ks = np.nonzero(occ[i, j])[0]\n        x0, y0, z_in = axis[i], axis[j], axis[ks[len(ks) // 2]]\n        tops.append(bisect(f, [x0, y0, z_in], [x0, y0, min(axis[ks[-1]] + coarse_mm, half)])[2])\n        bots.append(bisect(f, [x0, y0, z_in], [x0, y0, max(axis[ks[0]] - coarse_mm, -half)])[2])\n    z_top, z_bot = float(np.median(tops)), float(np.median(bots))\n    thickness = z_top - z_bot\n\n    # --- top-view slice just below the top face ---------------------------------------------------\n    z_probe = z_top - 0.2 * thickness\n    ii, jj = np.nonzero(occ.any(axis=2))\n    lo = np.array([axis[ii.min()] - 2 * coarse_mm, axis[jj.min()] - 2 * coarse_mm])\n    hi = np.array([axis[ii.max()] + 2 * coarse_mm, axis[jj.max()] + 2 * coarse_mm])\n    sx = np.arange(lo[0], hi[0] + 1e-9, slice_mm)\n    sy = np.arange(lo[1], hi[1] + 1e-9, slice_mm)\n    px, py = np.meshgrid(sx, sy, indexing=\"ij\")\n    sl = np.stack([px, py, np.full_like(px, z_probe)], -1).reshape(-1, 3)\n    solid = (f(sl) < 0).reshape(px.shape)\n\n    empty_labels, n_lab = label_components(~solid)\n    border = set(\n        np.unique(np.concatenate([empty_labels[0], empty_labels[-1], empty_labels[:, 0], empty_labels[:, -1]]))\n    )\n    filled = solid.copy()\n    hole_regions = []\n    for lab in range(1, n_lab + 1):\n        if lab in border:\n            continue\n        region = empty_labels == lab\n        filled |= region\n        if region.sum() * slice_mm**2 > 4.0:  # ignore specks < 4 mm^2\n            hole_regions.append(region)\n\n    # --- outline: rectangle vs disk from the fill ratio of the hole-free footprint ---------------\n    fi, fj = np.nonzero(filled)\n    ext_x = (sx[fi.min()], sx[fi.max()])\n    ext_y = (sy[fj.min()], sy[fj.max()])\n    cx0, cy0 = filled_centroid = (float(px[filled].mean()), float(py[filled].mean()))\n    z_mid = 0.5 * (z_top + z_bot)\n\n    # refine extents: march *inward* from outside along the X / Y lines through the footprint\n    # centroid, so that the first boundary met is the outer contour (not a hole wall)\n    def edge(start, direction, length):\n        p = march_to_boundary(f, start, direction, length, 0.25, True)\n        return start if p is None else p\n\n    span_x, span_y = ext_x[1] - ext_x[0] + 4 * slice_mm, ext_y[1] - ext_y[0] + 4 * slice_mm\n    xmax = edge([ext_x[1] + 2 * slice_mm, cy0, z_mid], [-1.0, 0, 0], span_x)[0]\n    xmin = edge([ext_x[0] - 2 * slice_mm, cy0, z_mid], [1.0, 0, 0], span_x)[0]\n    ymax = edge([cx0, ext_y[1] + 2 * slice_mm, z_mid], [0, -1.0, 0], span_y)[1]\n    ymin = edge([cx0, ext_y[0] - 2 * slice_mm, z_mid], [0, 1.0, 0], span_y)[1]\n    bbox_area = (ext_x[1] - ext_x[0] + slice_mm) * (ext_y[1] - ext_y[0] + slice_mm)\n    fill_ratio = float(filled.sum() * slice_mm**2 / bbox_area)\n    outline = \"rect\" if fill_ratio > 0.9 else \"disk\"\n\n    # --- holes ----------------------------------------------------------------------------------\n    holes = []\n    z_low = z_bot + 0.2 * thickness\n    for region in sorted(hole_regions, key=lambda r: -r.sum()):\n        hx, hy = float(px[region].mean()), float(py[region].mean())\n        r_eq = float(np.sqrt(region.sum() * slice_mm**2 / np.pi))\n        reach = 3.0 * r_eq + 5.0\n\n        def ring(z, hx=hx, hy=hy, reach=reach):\n            pts = []\n            for th in np.linspace(0, 2 * np.pi, n_rays, endpoint=False):\n                p = march_to_boundary(f, [hx, hy, z], [np.cos(th), np.sin(th), 0.0], reach, 0.25, True)\n                if p is not None:\n                    pts.append(p[:2])\n            return fit_circle(np.array(pts)) if len(pts) >= 8 else None\n\n        top = ring(z_probe)\n        if top is None:\n            continue\n        cx, cy, r_top, rms = top\n        # through vs blind: march down the axis from the probe slice, looking for material\n        floor = march_to_boundary(f, [cx, cy, z_probe], [0, 0, -1.0], z_probe - z_bot + 1.0, 0.25, True)\n        through = floor is None or floor[2] <= z_bot + 0.05 * thickness\n        hole = {\n            \"cx\": cx,\n            \"cy\": cy,\n            \"radius\": r_top,\n            \"through\": bool(through),\n            \"depth\": None,\n            \"cb_radius\": None,\n            \"cb_depth\": None,\n            \"circle_rms_mm\": rms,\n        }\n        # Radii are re-measured in the middle of each cylindrical segment: near the faces the\n        # fitted network rounds the edges, which biases ring measurements.\n        if not through:\n            z_floor = float(floor[2])\n            hole[\"depth\"] = float(z_top - z_floor)\n            mid = ring(0.5 * (z_top + z_floor))\n            if mid is not None:\n                hole.update(cx=mid[0], cy=mid[1], radius=mid[2], circle_rms_mm=mid[3])\n        else:\n            low = ring(z_low)\n            if low is not None and r_top > 1.2 * low[2]:\n                # counterbore: the probe slice cuts the counterbore; the low slice the hole itself\n                r_mid = 0.5 * (r_top + low[2])\n                cb_floor = march_to_boundary(f, [low[0] + r_mid, low[1], z_probe], [0, 0, -1.0], thickness, 0.25, True)\n                z_cb = float(cb_floor[2]) if cb_floor is not None else z_mid\n                inner = ring(0.5 * (z_bot + z_cb)) or low\n                outer = ring(0.5 * (z_top + z_cb)) or top\n                hole.update(\n                    cx=inner[0],\n                    cy=inner[1],\n                    radius=inner[2],\n                    circle_rms_mm=inner[3],\n                    cb_radius=outer[2],\n                    cb_depth=None if cb_floor is None else float(z_top - z_cb),\n                )\n            else:\n                mid = ring(z_mid)\n                if mid is not None:\n                    hole.update(cx=mid[0], cy=mid[1], radius=mid[2], circle_rms_mm=mid[3])\n        holes.append(hole)\n\n    if outline == \"disk\":\n        family = \"flange\"\n    elif not holes:\n        family = \"plate\"\n    elif holes[0][\"cb_radius\"] is not None:\n        family = \"counterbore\"\n    elif not holes[0][\"through\"]:\n        family = \"blind_hole\"\n    else:\n        family = \"through_hole\"\n\n    return {\n        \"family\": family,\n        \"outline\": outline,\n        \"size_x\": float(xmax - xmin),\n        \"size_y\": float(ymax - ymin),\n        \"center_x\": float(0.5 * (xmax + xmin)),\n        \"center_y\": float(0.5 * (ymax + ymin)),\n        \"thickness\": float(thickness),\n        \"z_bottom\": float(z_bot),\n        \"z_top\": float(z_top),\n        \"holes\": holes,\n        \"footprint_fill_ratio\": fill_ratio,\n        \"footprint_centroid\": [round(v, 3) for v in filled_centroid],\n        \"n_eval\": f.n_eval,\n    }\n\n\ndef architecture(layers):\n    return {\n        \"n_layers\": len(layers),\n        \"shapes\": [list(w.shape) for w, _ in layers],\n        \"n_params\": int(sum(w.size + b.size for w, b in layers)),\n        \"first_layer_axis_norms\": np.linalg.norm(layers[0][0], axis=0).round(3).tolist(),\n    }\n\n\nif __name__ == \"__sandbox__\":  # executed inside the sandbox: `weights` and `meta` are injected\n    _layers = layers_from_weights(weights)\n    RESULT = {\"architecture\": architecture(_layers), **read_part(_layers, meta.get(\"mm_per_unit\", 50.0))}\n"
+          },
+          "ok": true,
+          "output": "{\"ok\": true, \"stdout\": \"\", \"error\": null, \"result\": {\"architecture\": {\"n_layers\": 4, \"shapes\": [[64, 3], [64, 64], [64, 64], [1, 64]], \"n_params\": 8641, \"first_layer_axis_norms\": [2.528, 2.607, 3.452]}, \"family\": \"plate\", \"outline\": \"rect\", \"size_x\": 71.99605405307375, \"size_y\": 67.97151863598265, \"center_x\": 0.005555152893066406, \"center_y\": 0.001519918441772461, \"thickness\": 12.997419205494225, \"z_bottom\": -3.996929716086015, \"z_top\": 9.00048948940821, \"holes\": [], \"footprint_fill_ratio\": 0.99",
+          "seconds": 3.906
+        },
+        {
+          "tool": "submit_reading",
+          "input": {
+            "family": "plate",
+            "outline": "rect",
+            "size_x": 71.99605405307375,
+            "size_y": 67.97151863598265,
+            "thickness": 12.997419205494225,
+            "z_bottom": -3.996929716086015,
+            "holes": [],
+            "rationale": "architecture [[64, 3], [64, 64], [64, 64], [1, 64]] (8641 params) decoded from 8 tensors; first-layer column norms (x, y, z) = {'min': 2.527846, 'mean': 2.862394, 'max': 3.452372}\ntop-view footprint fill ratio 0.994 → outline 'rect' (rectangle ≈ 1.0, disk ≈ π/4 ≈ 0.785)\nthickness 13.00 mm: median of Z bisections along typical full-thickness columns\nno enclosed empty region in the top-view slice → no holes\n555655 field evaluations of the decoded program (numpy, in the sandbox)"
+          },
+          "ok": true,
+          "output": "{\"status\": \"accepted\"}",
+          "seconds": 0.0
+        }
+      ]
+    }
+  },
+  {
+    "part": "through_hole_0",
+    "spec": {
+      "name": "through_hole_0",
+      "outline": "rect",
+      "size_x": 76.5,
+      "size_y": 50.0,
+      "thickness": 11.5,
+      "z_bottom": -3.0,
+      "center_x": 0.0,
+      "center_y": 0.0,
+      "holes": [
+        {
+          "cx": -14.5,
+          "cy": 1.0,
+          "radius": 10.5,
+          "depth": null,
+          "cb_radius": null,
+          "cb_depth": null
+        }
+      ],
+      "family": "through_hole"
+    },
+    "fit_seconds": 13.221513131999927,
+    "score": {
+      "answered": true,
+      "family_gt": "through_hole",
+      "family_pred": "through_hole",
+      "family_correct": true,
+      "size_x_err": 0.07346713519655168,
+      "size_y_err": 0.012800842523574829,
+      "thickness_err": 0.0477479062974453,
+      "z_bottom_err": 0.011715690954588354,
+      "hole_count_correct": true,
+      "center_err": 0.03273562084968376,
+      "radius_err": 0.03202118766777318,
+      "through_correct": true
+    },
+    "seconds": 4.743560640999931,
+    "n_tool_calls": 4,
+    "agent_result": {
+      "agent": "scripted",
+      "finished": true,
+      "n_tool_calls": 4,
+      "usage": {},
+      "stop_reason": "finished",
+      "notes": [],
+      "final_answer": {
+        "family": "through_hole",
+        "outline": "rect",
+        "size_x": 76.42653286480345,
+        "size_y": 50.012800842523575,
+        "thickness": 11.547747906297445,
+        "z_bottom": -3.0117156909545884,
+        "holes": [
+          {
+            "cx": -14.487969357392243,
+            "cy": 1.0304447780556647,
+            "radius": 10.532021187667773,
+            "through": true,
+            "depth": null,
+            "cb_radius": null,
+            "cb_depth": null
+          }
+        ],
+        "rationale": "architecture [[64, 3], [64, 64], [64, 64], [1, 64]] (8641 params) decoded from 8 tensors; first-layer column norms (x, y, z) = {'min': 2.529296, 'mean': 2.879556, 'max': 3.292662}\ntop-view footprint fill ratio 0.994 → outline 'rect' (rectangle ≈ 1.0, disk ≈ π/4 ≈ 0.785)\nthickness 11.55 mm: median of Z bisections along typical full-thickness columns\nhole 0: empty region enclosed by material below the top face; circle fit to bisected boundary points → centre (-14.49, 1.03), R10.53 mm (rms 0.158); through\n576756 field evaluations of the decoded program (numpy, in the sandbox)"
+      },
+      "transcript": [
+        {
+          "tool": "list_parameters",
+          "input": {},
+          "ok": true,
+          "output": "[{\"name\": \"net.0.weight\", \"shape\": [64, 3], \"numel\": 192, \"dtype\": \"float32\"}, {\"name\": \"net.0.bias\", \"shape\": [64], \"numel\": 64, \"dtype\": \"float32\"}, {\"name\": \"net.2.weight\", \"shape\": [64, 64], \"numel\": 4096, \"dtype\": \"float32\"}, {\"name\": \"net.2.bias\", \"shape\": [64], \"numel\": 64, \"dtype\": \"float32\"}, {\"name\": \"net.4.weight\", \"shape\": [64, 64], \"numel\": 4096, \"dtype\": \"float32\"}, {\"name\": \"net.4.bias\", \"shape\": [64], \"numel\": 64, \"dtype\": \"float32\"}, {\"name\": \"net.6.weight\", \"shape\": [1, 64], \"n",
+          "seconds": 0.0
+        },
+        {
+          "tool": "tensor_stats",
+          "input": {
+            "name": "net.0.weight"
+          },
+          "ok": true,
+          "output": "{\"name\": \"net.0.weight\", \"shape\": [64, 3], \"mean\": -0.022384, \"std\": 0.362341, \"min\": -0.791169, \"max\": 0.682817, \"l2\": 5.017252, \"abs_mean\": 0.305681, \"frac_near_zero\": 0.015625, \"row_norms\": {\"min\": 0.079126, \"mean\": 0.600407, \"max\": 1.0665}, \"col_norms\": {\"min\": 2.529296, \"mean\": 2.879556, \"max\": 3.292662}, \"argmax_col_norm\": 2}",
+          "seconds": 0.001
+        },
+        {
+          "tool": "run_python",
+          "input": {
+            "code": "\"\"\"Read a 3D machine part out of the raw weights of a ReLU SDF network (numpy only).\n\nThis file is what an agent *submits to the sandbox* (``run_python``): it receives the raw\n``weights`` dict (``name -> ndarray``) and the ``meta`` model card, re-implements the forward\npass from the weight matrices alone, and returns a structured description of the part in\n``RESULT``. It can also be imported in-process (``read_part``) for verification loops.\n\nStrategy (the \"program comprehension\" of an SDF network):\n1. Decode the architecture from tensor names/shapes → list of (W, b).\n2. Evaluate the decoded program on a coarse grid → occupancy (sdf < 0).\n3. Refine planar extents (thickness, outline) with bisection along axis-aligned rays.\n4. Find holes in a slice just below the top face (empty regions not connected to the outside),\n   fit circles to bisection-refined boundary points, then classify each hole by probing its\n   axis (through vs. blind) and its radius profile along Z (counterbore).\n\"\"\"\n\nimport re\n\nimport numpy as np\n\n# ------------------------------------------------------------------------------------------------\n# Architecture decoding and the forward pass\n# ------------------------------------------------------------------------------------------------\n\n\ndef layers_from_weights(weights):\n    \"\"\"Group ``<prefix>.<idx>.weight`` / ``.bias`` tensors into an ordered list of (W, b).\"\"\"\n    idx = {}\n    for name in weights:\n        m = re.match(r\"^(.*?)(\\d+)\\.(weight|bias)$\", name)\n        if m:\n            idx.setdefault(int(m.group(2)), {})[m.group(3)] = np.asarray(weights[name], dtype=np.float64)\n    return [(idx[k][\"weight\"], idx[k][\"bias\"]) for k in sorted(idx)]\n\n\ndef forward(layers, x, max_floats=8_000_000):\n    \"\"\"Forward pass in float32, chunked so that no activation exceeds ``max_floats`` values.\"\"\"\n    width = max(w.shape[0] for w, _ in layers)\n    chunk = max(1024, max_floats // width)\n    out = []\n    for i in range(0, len(x), chunk):\n        h = np.asarray(x[i : i + chunk], dtype=np.float32)\n        for j, (w, b) in enumerate(layers):\n            h = h @ w.T + b\n            if j < len(layers) - 1:\n                np.maximum(h, 0.0, out=h)\n        out.append(h[:, 0])\n    return np.concatenate(out).astype(np.float64) if out else np.zeros(0)\n\n\nclass Probe:\n    \"\"\"SDF probe in millimetres that counts how many points were evaluated.\"\"\"\n\n    def __init__(self, layers, mm_per_unit):\n        self.layers = [(np.asarray(w, np.float32), np.asarray(b, np.float32)) for w, b in layers]\n        self.s, self.n_eval = float(mm_per_unit), 0\n\n    def __call__(self, p_mm):\n        p = np.atleast_2d(np.asarray(p_mm, dtype=np.float64))\n        self.n_eval += len(p)\n        return forward(self.layers, p / self.s) * self.s\n\n\ndef bisect(f, p_in, p_out, iters=30):\n    \"\"\"Boundary point on the segment between an inside (f<0) and an outside (f>=0) point.\"\"\"\n    a, b = np.asarray(p_in, float), np.asarray(p_out, float)\n    for _ in range(iters):\n        mid = 0.5 * (a + b)\n        if f(mid)[0] < 0:\n            a = mid\n        else:\n            b = mid\n    return 0.5 * (a + b)\n\n\ndef march_to_boundary(f, origin, direction, t_max, step, want_inside):\n    \"\"\"First point along a ray where ``(f<0) == want_inside``; refined by bisection.\"\"\"\n    direction = np.asarray(direction, float) / np.linalg.norm(direction)\n    ts = np.arange(step, t_max + 1e-9, step)\n    pts = np.asarray(origin, float)[None, :] + ts[:, None] * direction[None, :]\n    inside = f(pts) < 0\n    hit = np.nonzero(inside == want_inside)[0]\n    if len(hit) == 0:\n        return None\n    k = int(hit[0])\n    prev = np.asarray(origin, float) if k == 0 else pts[k - 1]\n    p_in, p_out = (pts[k], prev) if want_inside else (prev, pts[k])\n    return bisect(f, p_in, p_out)\n\n\ndef fit_circle(pts):\n    \"\"\"Algebraic (Kåsa) least-squares circle fit → (cx, cy, r, rms_residual).\"\"\"\n    x, y = pts[:, 0], pts[:, 1]\n    a = np.stack([x, y, np.ones_like(x)], axis=1)\n    sol, *_ = np.linalg.lstsq(a, x**2 + y**2, rcond=None)\n    cx, cy = sol[0] / 2, sol[1] / 2\n    r = float(np.sqrt(max(sol[2] + cx**2 + cy**2, 0.0)))\n    res = np.hypot(x - cx, y - cy) - r\n    return float(cx), float(cy), r, float(np.sqrt(np.mean(res**2)))\n\n\ndef label_components(mask):\n    \"\"\"4-connected component labelling (iterative flood fill, numpy only).\"\"\"\n    labels = np.zeros(mask.shape, dtype=np.int64)\n    current = 0\n    for seed in zip(*np.nonzero(mask), strict=True):\n        if labels[seed]:\n            continue\n        current += 1\n        stack = [seed]\n        labels[seed] = current\n        while stack:\n            i, j = stack.pop()\n            for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)):\n                a, b = i + di, j + dj\n                if 0 <= a < mask.shape[0] and 0 <= b < mask.shape[1] and mask[a, b] and not labels[a, b]:\n                    labels[a, b] = current\n                    stack.append((a, b))\n    return labels, current\n\n\n# ------------------------------------------------------------------------------------------------\n# Part reading\n# ------------------------------------------------------------------------------------------------\n\n\ndef read_part(layers, mm_per_unit=50.0, coarse_mm=1.25, slice_mm=0.5, n_rays=48):\n    f = Probe(layers, mm_per_unit)\n    half = mm_per_unit  # workspace is [-1, 1]^3 in normalised units\n    axis = np.arange(-half, half + 1e-9, coarse_mm)\n    gx, gy, gz = np.meshgrid(axis, axis, axis, indexing=\"ij\")\n    occ = (f(np.stack([gx, gy, gz], -1).reshape(-1, 3)) < 0).reshape(gx.shape)\n    if not occ.any():\n        return {\"empty\": True, \"n_eval\": f.n_eval}\n\n    # --- vertical extent: bisection along typical full-thickness columns -----------------------------\n    # The modal column fill (not the max, which picks up local bulges of the fitted field) identifies\n    # ordinary full-thickness material; 15 columns spread over it give a robust median.\n    column_fill = occ.sum(axis=2)\n    fills, counts = np.unique(column_fill[column_fill > 0], return_counts=True)\n    full = np.argwhere(column_fill == fills[np.argmax(counts)])\n    picks = full[np.linspace(0, len(full) - 1, min(15, len(full))).astype(int)]\n    tops, bots = [], []\n    for i, j in picks:\n        ks = np.nonzero(occ[i, j])[0]\n        x0, y0, z_in = axis[i], axis[j], axis[ks[len(ks) // 2]]\n        tops.append(bisect(f, [x0, y0, z_in], [x0, y0, min(axis[ks[-1]] + coarse_mm, half)])[2])\n        bots.append(bisect(f, [x0, y0, z_in], [x0, y0, max(axis[ks[0]] - coarse_mm, -half)])[2])\n    z_top, z_bot = float(np.median(tops)), float(np.median(bots))\n    thickness = z_top - z_bot\n\n    # --- top-view slice just below the top face ---------------------------------------------------\n    z_probe = z_top - 0.2 * thickness\n    ii, jj = np.nonzero(occ.any(axis=2))\n    lo = np.array([axis[ii.min()] - 2 * coarse_mm, axis[jj.min()] - 2 * coarse_mm])\n    hi = np.array([axis[ii.max()] + 2 * coarse_mm, axis[jj.max()] + 2 * coarse_mm])\n    sx = np.arange(lo[0], hi[0] + 1e-9, slice_mm)\n    sy = np.arange(lo[1], hi[1] + 1e-9, slice_mm)\n    px, py = np.meshgrid(sx, sy, indexing=\"ij\")\n    sl = np.stack([px, py, np.full_like(px, z_probe)], -1).reshape(-1, 3)\n    solid = (f(sl) < 0).reshape(px.shape)\n\n    empty_labels, n_lab = label_components(~solid)\n    border = set(\n        np.unique(np.concatenate([empty_labels[0], empty_labels[-1], empty_labels[:, 0], empty_labels[:, -1]]))\n    )\n    filled = solid.copy()\n    hole_regions = []\n    for lab in range(1, n_lab + 1):\n        if lab in border:\n            continue\n        region = empty_labels == lab\n        filled |= region\n        if region.sum() * slice_mm**2 > 4.0:  # ignore specks < 4 mm^2\n            hole_regions.append(region)\n\n    # --- outline: rectangle vs disk from the fill ratio of the hole-free footprint ---------------\n    fi, fj = np.nonzero(filled)\n    ext_x = (sx[fi.min()], sx[fi.max()])\n    ext_y = (sy[fj.min()], sy[fj.max()])\n    cx0, cy0 = filled_centroid = (float(px[filled].mean()), float(py[filled].mean()))\n    z_mid = 0.5 * (z_top + z_bot)\n\n    # refine extents: march *inward* from outside along the X / Y lines through the footprint\n    # centroid, so that the first boundary met is the outer contour (not a hole wall)\n    def edge(start, direction, length):\n        p = march_to_boundary(f, start, direction, length, 0.25, True)\n        return start if p is None else p\n\n    span_x, span_y = ext_x[1] - ext_x[0] + 4 * slice_mm, ext_y[1] - ext_y[0] + 4 * slice_mm\n    xmax = edge([ext_x[1] + 2 * slice_mm, cy0, z_mid], [-1.0, 0, 0], span_x)[0]\n    xmin = edge([ext_x[0] - 2 * slice_mm, cy0, z_mid], [1.0, 0, 0], span_x)[0]\n    ymax = edge([cx0, ext_y[1] + 2 * slice_mm, z_mid], [0, -1.0, 0], span_y)[1]\n    ymin = edge([cx0, ext_y[0] - 2 * slice_mm, z_mid], [0, 1.0, 0], span_y)[1]\n    bbox_area = (ext_x[1] - ext_x[0] + slice_mm) * (ext_y[1] - ext_y[0] + slice_mm)\n    fill_ratio = float(filled.sum() * slice_mm**2 / bbox_area)\n    outline = \"rect\" if fill_ratio > 0.9 else \"disk\"\n\n    # --- holes ----------------------------------------------------------------------------------\n    holes = []\n    z_low = z_bot + 0.2 * thickness\n    for region in sorted(hole_regions, key=lambda r: -r.sum()):\n        hx, hy = float(px[region].mean()), float(py[region].mean())\n        r_eq = float(np.sqrt(region.sum() * slice_mm**2 / np.pi))\n        reach = 3.0 * r_eq + 5.0\n\n        def ring(z, hx=hx, hy=hy, reach=reach):\n            pts = []\n            for th in np.linspace(0, 2 * np.pi, n_rays, endpoint=False):\n                p = march_to_boundary(f, [hx, hy, z], [np.cos(th), np.sin(th), 0.0], reach, 0.25, True)\n                if p is not None:\n                    pts.append(p[:2])\n            return fit_circle(np.array(pts)) if len(pts) >= 8 else None\n\n        top = ring(z_probe)\n        if top is None:\n            continue\n        cx, cy, r_top, rms = top\n        # through vs blind: march down the axis from the probe slice, looking for material\n        floor = march_to_boundary(f, [cx, cy, z_probe], [0, 0, -1.0], z_probe - z_bot + 1.0, 0.25, True)\n        through = floor is None or floor[2] <= z_bot + 0.05 * thickness\n        hole = {\n            \"cx\": cx,\n            \"cy\": cy,\n            \"radius\": r_top,\n            \"through\": bool(through),\n            \"depth\": None,\n            \"cb_radius\": None,\n            \"cb_depth\": None,\n            \"circle_rms_mm\": rms,\n        }\n        # Radii are re-measured in the middle of each cylindrical segment: near the faces the\n        # fitted network rounds the edges, which biases ring measurements.\n        if not through:\n            z_floor = float(floor[2])\n            hole[\"depth\"] = float(z_top - z_floor)\n            mid = ring(0.5 * (z_top + z_floor))\n            if mid is not None:\n                hole.update(cx=mid[0], cy=mid[1], radius=mid[2], circle_rms_mm=mid[3])\n        else:\n            low = ring(z_low)\n            if low is not None and r_top > 1.2 * low[2]:\n                # counterbore: the probe slice cuts the counterbore; the low slice the hole itself\n                r_mid = 0.5 * (r_top + low[2])\n                cb_floor = march_to_boundary(f, [low[0] + r_mid, low[1], z_probe], [0, 0, -1.0], thickness, 0.25, True)\n                z_cb = float(cb_floor[2]) if cb_floor is not None else z_mid\n                inner = ring(0.5 * (z_bot + z_cb)) or low\n                outer = ring(0.5 * (z_top + z_cb)) or top\n                hole.update(\n                    cx=inner[0],\n                    cy=inner[1],\n                    radius=inner[2],\n                    circle_rms_mm=inner[3],\n                    cb_radius=outer[2],\n                    cb_depth=None if cb_floor is None else float(z_top - z_cb),\n                )\n            else:\n                mid = ring(z_mid)\n                if mid is not None:\n                    hole.update(cx=mid[0], cy=mid[1], radius=mid[2], circle_rms_mm=mid[3])\n        holes.append(hole)\n\n    if outline == \"disk\":\n        family = \"flange\"\n    elif not holes:\n        family = \"plate\"\n    elif holes[0][\"cb_radius\"] is not None:\n        family = \"counterbore\"\n    elif not holes[0][\"through\"]:\n        family = \"blind_hole\"\n    else:\n        family = \"through_hole\"\n\n    return {\n        \"family\": family,\n        \"outline\": outline,\n        \"size_x\": float(xmax - xmin),\n        \"size_y\": float(ymax - ymin),\n        \"center_x\": float(0.5 * (xmax + xmin)),\n        \"center_y\": float(0.5 * (ymax + ymin)),\n        \"thickness\": float(thickness),\n        \"z_bottom\": float(z_bot),\n        \"z_top\": float(z_top),\n        \"holes\": holes,\n        \"footprint_fill_ratio\": fill_ratio,\n        \"footprint_centroid\": [round(v, 3) for v in filled_centroid],\n        \"n_eval\": f.n_eval,\n    }\n\n\ndef architecture(layers):\n    return {\n        \"n_layers\": len(layers),\n        \"shapes\": [list(w.shape) for w, _ in layers],\n        \"n_params\": int(sum(w.size + b.size for w, b in layers)),\n        \"first_layer_axis_norms\": np.linalg.norm(layers[0][0], axis=0).round(3).tolist(),\n    }\n\n\nif __name__ == \"__sandbox__\":  # executed inside the sandbox: `weights` and `meta` are injected\n    _layers = layers_from_weights(weights)\n    RESULT = {\"architecture\": architecture(_layers), **read_part(_layers, meta.get(\"mm_per_unit\", 50.0))}\n"
+          },
+          "ok": true,
+          "output": "{\"ok\": true, \"stdout\": \"\", \"error\": null, \"result\": {\"architecture\": {\"n_layers\": 4, \"shapes\": [[64, 3], [64, 64], [64, 64], [1, 64]], \"n_params\": 8641, \"first_layer_axis_norms\": [2.529, 2.817, 3.293]}, \"family\": \"through_hole\", \"outline\": \"rect\", \"size_x\": 76.42653286480345, \"size_y\": 50.012800842523575, \"center_x\": -0.03567337989807129, \"center_y\": 0.00937841844279319, \"thickness\": 11.547747906297445, \"z_bottom\": -3.0117156909545884, \"z_top\": 8.536032215342857, \"holes\": [{\"cx\": -14.48796935739",
+          "seconds": 4.742
+        },
+        {
+          "tool": "submit_reading",
+          "input": {
+            "family": "through_hole",
+            "outline": "rect",
+            "size_x": 76.42653286480345,
+            "size_y": 50.012800842523575,
+            "thickness": 11.547747906297445,
+            "z_bottom": -3.0117156909545884,
+            "holes": [
+              {
+                "cx": -14.487969357392243,
+                "cy": 1.0304447780556647,
+                "radius": 10.532021187667773,
+                "through": true,
+                "depth": null,
+                "cb_radius": null,
+                "cb_depth": null
+              }
+            ],
+            "rationale": "architecture [[64, 3], [64, 64], [64, 64], [1, 64]] (8641 params) decoded from 8 tensors; first-layer column norms (x, y, z) = {'min': 2.529296, 'mean': 2.879556, 'max': 3.292662}\ntop-view footprint fill ratio 0.994 → outline 'rect' (rectangle ≈ 1.0, disk ≈ π/4 ≈ 0.785)\nthickness 11.55 mm: median of Z bisections along typical full-thickness columns\nhole 0: empty region enclosed by material below the top face; circle fit to bisected boundary points → centre (-14.49, 1.03), R10.53 mm (rms 0.158); through\n576756 field evaluations of the decoded program (numpy, in the sandbox)"
+          },
+          "ok": true,
+          "output": "{\"status\": \"accepted\"}",
+          "seconds": 0.0
+        }
+      ]
+    }
+  },
+  {
+    "part": "through_hole_1",
+    "spec": {
+      "name": "through_hole_1",
+      "outline": "rect",
+      "size_x": 71.0,
+      "size_y": 57.5,
+      "thickness": 9.0,
+      "z_bottom": -2.5,
+      "center_x": 0.0,
+      "center_y": 0.0,
+      "holes": [
+        {
+          "cx": -14.5,
+          "cy": -6.5,
+          "radius": 8.0,
+          "depth": null,
+          "cb_radius": null,
+          "cb_depth": null
+        }
+      ],
+      "family": "through_hole"
+    },
+    "fit_seconds": 13.366311263999705,
+    "score": {
+      "answered": true,
+      "family_gt": "through_hole",
+      "family_pred": "through_hole",
+      "family_correct": true,
+      "size_x_err": 0.04259431385435164,
+      "size_y_err": 0.024302005767822266,
+      "thickness_err": 0.07307090412359685,
+      "z_bottom_err": 0.05249375419225544,
+      "hole_count_correct": true,
+      "center_err": 0.22655096856836088,
+      "radius_err": 0.009060311494318185,
+      "through_correct": true
+    },
+    "seconds": 4.295568436999929,
+    "n_tool_calls": 4,
+    "agent_result": {
+      "agent": "scripted",
+      "finished": true,
+      "n_tool_calls": 4,
+      "usage": {},
+      "stop_reason": "finished",
+      "notes": [],
+      "final_answer": {
+        "family": "through_hole",
+        "outline": "rect",
+        "size_x": 71.04259431385435,
+        "size_y": 57.47569799423218,
+        "thickness": 9.073070904123597,
+        "z_bottom": -2.5524937541922554,
+        "holes": [
+          {
+            "cx": -14.340175916326132,
+            "cy": -6.339433491546117,
+            "radius": 8.009060311494318,
+            "through": true,
+            "depth": null,
+            "cb_radius": null,
+            "cb_depth": null
+          }
+        ],
+        "rationale": "architecture [[64, 3], [64, 64], [64, 64], [1, 64]] (8641 params) decoded from 8 tensors; first-layer column norms (x, y, z) = {'min': 2.487792, 'mean': 2.825564, 'max': 3.317003}\ntop-view footprint fill ratio 0.989 → outline 'rect' (rectangle ≈ 1.0, disk ≈ π/4 ≈ 0.785)\nthickness 9.07 mm: median of Z bisections along typical full-thickness columns\nhole 0: empty region enclosed by material below the top face; circle fit to bisected boundary points → centre (-14.34, -6.34), R8.01 mm (rms 0.265); through\n573172 field evaluations of the decoded program (numpy, in the sandbox)"
+      },
+      "transcript": [
+        {
+          "tool": "list_parameters",
+          "input": {},
+          "ok": true,
+          "output": "[{\"name\": \"net.0.weight\", \"shape\": [64, 3], \"numel\": 192, \"dtype\": \"float32\"}, {\"name\": \"net.0.bias\", \"shape\": [64], \"numel\": 64, \"dtype\": \"float32\"}, {\"name\": \"net.2.weight\", \"shape\": [64, 64], \"numel\": 4096, \"dtype\": \"float32\"}, {\"name\": \"net.2.bias\", \"shape\": [64], \"numel\": 64, \"dtype\": \"float32\"}, {\"name\": \"net.4.weight\", \"shape\": [64, 64], \"numel\": 4096, \"dtype\": \"float32\"}, {\"name\": \"net.4.bias\", \"shape\": [64], \"numel\": 64, \"dtype\": \"float32\"}, {\"name\": \"net.6.weight\", \"shape\": [1, 64], \"n",
+          "seconds": 0.0
+        },
+        {
+          "tool": "tensor_stats",
+          "input": {
+            "name": "net.0.weight"
+          },
+          "ok": true,
+          "output": "{\"name\": \"net.0.weight\", \"shape\": [64, 3], \"mean\": -0.022809, \"std\": 0.356178, \"min\": -0.742651, \"max\": 0.709611, \"l2\": 4.932612, \"abs_mean\": 0.298849, \"frac_near_zero\": 0.010417, \"row_norms\": {\"min\": 0.079126, \"mean\": 0.590625, \"max\": 0.870723}, \"col_norms\": {\"min\": 2.487792, \"mean\": 2.825564, \"max\": 3.317003}, \"argmax_col_norm\": 2}",
+          "seconds": 0.001
+        },
+        {
+          "tool": "run_python",
+          "input": {
+            "code": "\"\"\"Read a 3D machine part out of the raw weights of a ReLU SDF network (numpy only).\n\nThis file is what an agent *submits to the sandbox* (``run_python``): it receives the raw\n``weights`` dict (``name -> ndarray``) and the ``meta`` model card, re-implements the forward\npass from the weight matrices alone, and returns a structured description of the part in\n``RESULT``. It can also be imported in-process (``read_part``) for verification loops.\n\nStrategy (the \"program comprehension\" of an SDF network):\n1. Decode the architecture from tensor names/shapes → list of (W, b).\n2. Evaluate the decoded program on a coarse grid → occupancy (sdf < 0).\n3. Refine planar extents (thickness, outline) with bisection along axis-aligned rays.\n4. Find holes in a slice just below the top face (empty regions not connected to the outside),\n   fit circles to bisection-refined boundary points, then classify each hole by probing its\n   axis (through vs. blind) and its radius profile along Z (counterbore).\n\"\"\"\n\nimport re\n\nimport numpy as np\n\n# ------------------------------------------------------------------------------------------------\n# Architecture decoding and the forward pass\n# ------------------------------------------------------------------------------------------------\n\n\ndef layers_from_weights(weights):\n    \"\"\"Group ``<prefix>.<idx>.weight`` / ``.bias`` tensors into an ordered list of (W, b).\"\"\"\n    idx = {}\n    for name in weights:\n        m = re.match(r\"^(.*?)(\\d+)\\.(weight|bias)$\", name)\n        if m:\n            idx.setdefault(int(m.group(2)), {})[m.group(3)] = np.asarray(weights[name], dtype=np.float64)\n    return [(idx[k][\"weight\"], idx[k][\"bias\"]) for k in sorted(idx)]\n\n\ndef forward(layers, x, max_floats=8_000_000):\n    \"\"\"Forward pass in float32, chunked so that no activation exceeds ``max_floats`` values.\"\"\"\n    width = max(w.shape[0] for w, _ in layers)\n    chunk = max(1024, max_floats // width)\n    out = []\n    for i in range(0, len(x), chunk):\n        h = np.asarray(x[i : i + chunk], dtype=np.float32)\n        for j, (w, b) in enumerate(layers):\n            h = h @ w.T + b\n            if j < len(layers) - 1:\n                np.maximum(h, 0.0, out=h)\n        out.append(h[:, 0])\n    return np.concatenate(out).astype(np.float64) if out else np.zeros(0)\n\n\nclass Probe:\n    \"\"\"SDF probe in millimetres that counts how many points were evaluated.\"\"\"\n\n    def __init__(self, layers, mm_per_unit):\n        self.layers = [(np.asarray(w, np.float32), np.asarray(b, np.float32)) for w, b in layers]\n        self.s, self.n_eval = float(mm_per_unit), 0\n\n    def __call__(self, p_mm):\n        p = np.atleast_2d(np.asarray(p_mm, dtype=np.float64))\n        self.n_eval += len(p)\n        return forward(self.layers, p / self.s) * self.s\n\n\ndef bisect(f, p_in, p_out, iters=30):\n    \"\"\"Boundary point on the segment between an inside (f<0) and an outside (f>=0) point.\"\"\"\n    a, b = np.asarray(p_in, float), np.asarray(p_out, float)\n    for _ in range(iters):\n        mid = 0.5 * (a + b)\n        if f(mid)[0] < 0:\n            a = mid\n        else:\n            b = mid\n    return 0.5 * (a + b)\n\n\ndef march_to_boundary(f, origin, direction, t_max, step, want_inside):\n    \"\"\"First point along a ray where ``(f<0) == want_inside``; refined by bisection.\"\"\"\n    direction = np.asarray(direction, float) / np.linalg.norm(direction)\n    ts = np.arange(step, t_max + 1e-9, step)\n    pts = np.asarray(origin, float)[None, :] + ts[:, None] * direction[None, :]\n    inside = f(pts) < 0\n    hit = np.nonzero(inside == want_inside)[0]\n    if len(hit) == 0:\n        return None\n    k = int(hit[0])\n    prev = np.asarray(origin, float) if k == 0 else pts[k - 1]\n    p_in, p_out = (pts[k], prev) if want_inside else (prev, pts[k])\n    return bisect(f, p_in, p_out)\n\n\ndef fit_circle(pts):\n    \"\"\"Algebraic (Kåsa) least-squares circle fit → (cx, cy, r, rms_residual).\"\"\"\n    x, y = pts[:, 0], pts[:, 1]\n    a = np.stack([x, y, np.ones_like(x)], axis=1)\n    sol, *_ = np.linalg.lstsq(a, x**2 + y**2, rcond=None)\n    cx, cy = sol[0] / 2, sol[1] / 2\n    r = float(np.sqrt(max(sol[2] + cx**2 + cy**2, 0.0)))\n    res = np.hypot(x - cx, y - cy) - r\n    return float(cx), float(cy), r, float(np.sqrt(np.mean(res**2)))\n\n\ndef label_components(mask):\n    \"\"\"4-connected component labelling (iterative flood fill, numpy only).\"\"\"\n    labels = np.zeros(mask.shape, dtype=np.int64)\n    current = 0\n    for seed in zip(*np.nonzero(mask), strict=True):\n        if labels[seed]:\n            continue\n        current += 1\n        stack = [seed]\n        labels[seed] = current\n        while stack:\n            i, j = stack.pop()\n            for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)):\n                a, b = i + di, j + dj\n                if 0 <= a < mask.shape[0] and 0 <= b < mask.shape[1] and mask[a, b] and not labels[a, b]:\n                    labels[a, b] = current\n                    stack.append((a, b))\n    return labels, current\n\n\n# ------------------------------------------------------------------------------------------------\n# Part reading\n# ------------------------------------------------------------------------------------------------\n\n\ndef read_part(layers, mm_per_unit=50.0, coarse_mm=1.25, slice_mm=0.5, n_rays=48):\n    f = Probe(layers, mm_per_unit)\n    half = mm_per_unit  # workspace is [-1, 1]^3 in normalised units\n    axis = np.arange(-half, half + 1e-9, coarse_mm)\n    gx, gy, gz = np.meshgrid(axis, axis, axis, indexing=\"ij\")\n    occ = (f(np.stack([gx, gy, gz], -1).reshape(-1, 3)) < 0).reshape(gx.shape)\n    if not occ.any():\n        return {\"empty\": True, \"n_eval\": f.n_eval}\n\n    # --- vertical extent: bisection along typical full-thickness columns -----------------------------\n    # The modal column fill (not the max, which picks up local bulges of the fitted field) identifies\n    # ordinary full-thickness material; 15 columns spread over it give a robust median.\n    column_fill = occ.sum(axis=2)\n    fills, counts = np.unique(column_fill[column_fill > 0], return_counts=True)\n    full = np.argwhere(column_fill == fills[np.argmax(counts)])\n    picks = full[np.linspace(0, len(full) - 1, min(15, len(full))).astype(int)]\n    tops, bots = [], []\n    for i, j in picks:\n        ks = np.nonzero(occ[i, j])[0]\n        x0, y0, z_in = axis[i], axis[j], axis[ks[len(ks) // 2]]\n        tops.append(bisect(f, [x0, y0, z_in], [x0, y0, min(axis[ks[-1]] + coarse_mm, half)])[2])\n        bots.append(bisect(f, [x0, y0, z_in], [x0, y0, max(axis[ks[0]] - coarse_mm, -half)])[2])\n    z_top, z_bot = float(np.median(tops)), float(np.median(bots))\n    thickness = z_top - z_bot\n\n    # --- top-view slice just below the top face ---------------------------------------------------\n    z_probe = z_top - 0.2 * thickness\n    ii, jj = np.nonzero(occ.any(axis=2))\n    lo = np.array([axis[ii.min()] - 2 * coarse_mm, axis[jj.min()] - 2 * coarse_mm])\n    hi = np.array([axis[ii.max()] + 2 * coarse_mm, axis[jj.max()] + 2 * coarse_mm])\n    sx = np.arange(lo[0], hi[0] + 1e-9, slice_mm)\n    sy = np.arange(lo[1], hi[1] + 1e-9, slice_mm)\n    px, py = np.meshgrid(sx, sy, indexing=\"ij\")\n    sl = np.stack([px, py, np.full_like(px, z_probe)], -1).reshape(-1, 3)\n    solid = (f(sl) < 0).reshape(px.shape)\n\n    empty_labels, n_lab = label_components(~solid)\n    border = set(\n        np.unique(np.concatenate([empty_labels[0], empty_labels[-1], empty_labels[:, 0], empty_labels[:, -1]]))\n    )\n    filled = solid.copy()\n    hole_regions = []\n    for lab in range(1, n_lab + 1):\n        if lab in border:\n            continue\n        region = empty_labels == lab\n        filled |= region\n        if region.sum() * slice_mm**2 > 4.0:  # ignore specks < 4 mm^2\n            hole_regions.append(region)\n\n    # --- outline: rectangle vs disk from the fill ratio of the hole-free footprint ---------------\n    fi, fj = np.nonzero(filled)\n    ext_x = (sx[fi.min()], sx[fi.max()])\n    ext_y = (sy[fj.min()], sy[fj.max()])\n    cx0, cy0 = filled_centroid = (float(px[filled].mean()), float(py[filled].mean()))\n    z_mid = 0.5 * (z_top + z_bot)\n\n    # refine extents: march *inward* from outside along the X / Y lines through the footprint\n    # centroid, so that the first boundary met is the outer contour (not a hole wall)\n    def edge(start, direction, length):\n        p = march_to_boundary(f, start, direction, length, 0.25, True)\n        return start if p is None else p\n\n    span_x, span_y = ext_x[1] - ext_x[0] + 4 * slice_mm, ext_y[1] - ext_y[0] + 4 * slice_mm\n    xmax = edge([ext_x[1] + 2 * slice_mm, cy0, z_mid], [-1.0, 0, 0], span_x)[0]\n    xmin = edge([ext_x[0] - 2 * slice_mm, cy0, z_mid], [1.0, 0, 0], span_x)[0]\n    ymax = edge([cx0, ext_y[1] + 2 * slice_mm, z_mid], [0, -1.0, 0], span_y)[1]\n    ymin = edge([cx0, ext_y[0] - 2 * slice_mm, z_mid], [0, 1.0, 0], span_y)[1]\n    bbox_area = (ext_x[1] - ext_x[0] + slice_mm) * (ext_y[1] - ext_y[0] + slice_mm)\n    fill_ratio = float(filled.sum() * slice_mm**2 / bbox_area)\n    outline = \"rect\" if fill_ratio > 0.9 else \"disk\"\n\n    # --- holes ----------------------------------------------------------------------------------\n    holes = []\n    z_low = z_bot + 0.2 * thickness\n    for region in sorted(hole_regions, key=lambda r: -r.sum()):\n        hx, hy = float(px[region].mean()), float(py[region].mean())\n        r_eq = float(np.sqrt(region.sum() * slice_mm**2 / np.pi))\n        reach = 3.0 * r_eq + 5.0\n\n        def ring(z, hx=hx, hy=hy, reach=reach):\n            pts = []\n            for th in np.linspace(0, 2 * np.pi, n_rays, endpoint=False):\n                p = march_to_boundary(f, [hx, hy, z], [np.cos(th), np.sin(th), 0.0], reach, 0.25, True)\n                if p is not None:\n                    pts.append(p[:2])\n            return fit_circle(np.array(pts)) if len(pts) >= 8 else None\n\n        top = ring(z_probe)\n        if top is None:\n            continue\n        cx, cy, r_top, rms = top\n        # through vs blind: march down the axis from the probe slice, looking for material\n        floor = march_to_boundary(f, [cx, cy, z_probe], [0, 0, -1.0], z_probe - z_bot + 1.0, 0.25, True)\n        through = floor is None or floor[2] <= z_bot + 0.05 * thickness\n        hole = {\n            \"cx\": cx,\n            \"cy\": cy,\n            \"radius\": r_top,\n            \"through\": bool(through),\n            \"depth\": None,\n            \"cb_radius\": None,\n            \"cb_depth\": None,\n            \"circle_rms_mm\": rms,\n        }\n        # Radii are re-measured in the middle of each cylindrical segment: near the faces the\n        # fitted network rounds the edges, which biases ring measurements.\n        if not through:\n            z_floor = float(floor[2])\n            hole[\"depth\"] = float(z_top - z_floor)\n            mid = ring(0.5 * (z_top + z_floor))\n            if mid is not None:\n                hole.update(cx=mid[0], cy=mid[1], radius=mid[2], circle_rms_mm=mid[3])\n        else:\n            low = ring(z_low)\n            if low is not None and r_top > 1.2 * low[2]:\n                # counterbore: the probe slice cuts the counterbore; the low slice the hole itself\n                r_mid = 0.5 * (r_top + low[2])\n                cb_floor = march_to_boundary(f, [low[0] + r_mid, low[1], z_probe], [0, 0, -1.0], thickness, 0.25, True)\n                z_cb = float(cb_floor[2]) if cb_floor is not None else z_mid\n                inner = ring(0.5 * (z_bot + z_cb)) or low\n                outer = ring(0.5 * (z_top + z_cb)) or top\n                hole.update(\n                    cx=inner[0],\n                    cy=inner[1],\n                    radius=inner[2],\n                    circle_rms_mm=inner[3],\n                    cb_radius=outer[2],\n                    cb_depth=None if cb_floor is None else float(z_top - z_cb),\n                )\n            else:\n                mid = ring(z_mid)\n                if mid is not None:\n                    hole.update(cx=mid[0], cy=mid[1], radius=mid[2], circle_rms_mm=mid[3])\n        holes.append(hole)\n\n    if outline == \"disk\":\n        family = \"flange\"\n    elif not holes:\n        family = \"plate\"\n    elif holes[0][\"cb_radius\"] is not None:\n        family = \"counterbore\"\n    elif not holes[0][\"through\"]:\n        family = \"blind_hole\"\n    else:\n        family = \"through_hole\"\n\n    return {\n        \"family\": family,\n        \"outline\": outline,\n        \"size_x\": float(xmax - xmin),\n        \"size_y\": float(ymax - ymin),\n        \"center_x\": float(0.5 * (xmax + xmin)),\n        \"center_y\": float(0.5 * (ymax + ymin)),\n        \"thickness\": float(thickness),\n        \"z_bottom\": float(z_bot),\n        \"z_top\": float(z_top),\n        \"holes\": holes,\n        \"footprint_fill_ratio\": fill_ratio,\n        \"footprint_centroid\": [round(v, 3) for v in filled_centroid],\n        \"n_eval\": f.n_eval,\n    }\n\n\ndef architecture(layers):\n    return {\n        \"n_layers\": len(layers),\n        \"shapes\": [list(w.shape) for w, _ in layers],\n        \"n_params\": int(sum(w.size + b.size for w, b in layers)),\n        \"first_layer_axis_norms\": np.linalg.norm(layers[0][0], axis=0).round(3).tolist(),\n    }\n\n\nif __name__ == \"__sandbox__\":  # executed inside the sandbox: `weights` and `meta` are injected\n    _layers = layers_from_weights(weights)\n    RESULT = {\"architecture\": architecture(_layers), **read_part(_layers, meta.get(\"mm_per_unit\", 50.0))}\n"
+          },
+          "ok": true,
+          "output": "{\"ok\": true, \"stdout\": \"\", \"error\": null, \"result\": {\"architecture\": {\"n_layers\": 4, \"shapes\": [[64, 3], [64, 64], [64, 64], [1, 64]], \"n_params\": 8641, \"first_layer_axis_norms\": [2.488, 2.672, 3.317]}, \"family\": \"through_hole\", \"outline\": \"rect\", \"size_x\": 71.04259431385435, \"size_y\": 57.47569799423218, \"center_x\": 0.0109940767288208, \"center_y\": 0.00459998834412545, \"thickness\": 9.073070904123597, \"z_bottom\": -2.5524937541922554, \"z_top\": 6.520577149931341, \"holes\": [{\"cx\": -14.340175916326132",
+          "seconds": 4.294
+        },
+        {
+          "tool": "submit_reading",
+          "input": {
+            "family": "through_hole",
+            "outline": "rect",
+            "size_x": 71.04259431385435,
+            "size_y": 57.47569799423218,
+            "thickness": 9.073070904123597,
+            "z_bottom": -2.5524937541922554,
+            "holes": [
+              {
+                "cx": -14.340175916326132,
+                "cy": -6.339433491546117,
+                "radius": 8.009060311494318,
+                "through": true,
+                "depth": null,
+                "cb_radius": null,
+                "cb_depth": null
+              }
+            ],
+            "rationale": "architecture [[64, 3], [64, 64], [64, 64], [1, 64]] (8641 params) decoded from 8 tensors; first-layer column norms (x, y, z) = {'min': 2.487792, 'mean': 2.825564, 'max': 3.317003}\ntop-view footprint fill ratio 0.989 → outline 'rect' (rectangle ≈ 1.0, disk ≈ π/4 ≈ 0.785)\nthickness 9.07 mm: median of Z bisections along typical full-thickness columns\nhole 0: empty region enclosed by material below the top face; circle fit to bisected boundary points → centre (-14.34, -6.34), R8.01 mm (rms 0.265); through\n573172 field evaluations of the decoded program (numpy, in the sandbox)"
+          },
+          "ok": true,
+          "output": "{\"status\": \"accepted\"}",
+          "seconds": 0.0
+        }
+      ]
+    }
+  },
+  {
+    "part": "blind_hole_0",
+    "spec": {
+      "name": "blind_hole_0",
+      "outline": "rect",
+      "size_x": 72.5,
+      "size_y": 59.5,
+      "thickness": 12.0,
+      "z_bottom": -5.0,
+      "center_x": 0.0,
+      "center_y": 0.0,
+      "holes": [
+        {
+          "cx": 12.5,
+          "cy": 2.5,
+          "radius": 11.0,
+          "depth": 7.0,
+          "cb_radius": null,
+          "cb_depth": null
+        }
+      ],
+      "family": "blind_hole"
+    },
+    "fit_seconds": 14.26283028600028,
+    "score": {
+      "answered": true,
+      "family_gt": "blind_hole",
+      "family_pred": "blind_hole",
+      "family_correct": true,
+      "size_x_err": 0.021124482387676835,
+      "size_y_err": 0.007903694873675704,
+      "thickness_err": 0.037882186472415924,
+      "z_bottom_err": 0.05115654494147748,
+      "hole_count_correct": true,
+      "center_err": 0.03455651503022896,
+      "radius_err": 0.17069079690054778,
+      "through_correct": true,
+      "depth_err": 0.02747261186596006
+    },
+    "seconds": 4.386804722000306,
+    "n_tool_calls": 4,
+    "agent_result": {
+      "agent": "scripted",
+      "finished": true,
+      "n_tool_calls": 4,
+      "usage": {},
+      "stop_reason": "finished",
+      "notes": [],
+      "final_answer": {
+        "family": "blind_hole",
+        "outline": "rect",
+        "size_x": 72.47887551761232,
+        "size_y": 59.492096305126324,
+        "thickness": 11.962117813527584,
+        "z_bottom": -4.9488434550585225,
+        "holes": [
+          {
+            "cx": 12.532990444042927,
+            "cy": 2.5102851024732358,
+            "radius": 11.170690796900548,
+            "through": false,
+            "depth": 7.02747261186596,
+            "cb_radius": null,
+            "cb_depth": null
+          }
+        ],
+        "rationale": "architecture [[64, 3], [64, 64], [64, 64], [1, 64]] (8641 params) decoded from 8 tensors; first-layer column norms (x, y, z) = {'min': 2.57178, 'mean': 2.942743, 'max': 3.595754}\ntop-view footprint fill ratio 0.991 → outline 'rect' (rectangle ≈ 1.0, disk ≈ π/4 ≈ 0.785)\nthickness 11.96 mm: median of Z bisections along typical full-thickness columns\nhole 0: empty region enclosed by material below the top face; circle fit to bisected boundary points → centre (12.53, 2.51), R11.17 mm (rms 0.201); blind, depth 7.03 mm (material found on the axis)\n570557 field evaluations of the decoded program (numpy, in the sandbox)"
+      },
+      "transcript": [
+        {
+          "tool": "list_parameters",
+          "input": {},
+          "ok": true,
+          "output": "[{\"name\": \"net.0.weight\", \"shape\": [64, 3], \"numel\": 192, \"dtype\": \"float32\"}, {\"name\": \"net.0.bias\", \"shape\": [64], \"numel\": 64, \"dtype\": \"float32\"}, {\"name\": \"net.2.weight\", \"shape\": [64, 64], \"numel\": 4096, \"dtype\": \"float32\"}, {\"name\": \"net.2.bias\", \"shape\": [64], \"numel\": 64, \"dtype\": \"float32\"}, {\"name\": \"net.4.weight\", \"shape\": [64, 64], \"numel\": 4096, \"dtype\": \"float32\"}, {\"name\": \"net.4.bias\", \"shape\": [64], \"numel\": 64, \"dtype\": \"float32\"}, {\"name\": \"net.6.weight\", \"shape\": [1, 64], \"n",
+          "seconds": 0.0
+        },
+        {
+          "tool": "tensor_stats",
+          "input": {
+            "name": "net.0.weight"
+          },
+          "ok": true,
+          "output": "{\"name\": \"net.0.weight\", \"shape\": [64, 3], \"mean\": -0.026632, \"std\": 0.372389, \"min\": -1.024856, \"max\": 0.71958, \"l2\": 5.159728, \"abs_mean\": 0.311825, \"frac_near_zero\": 0.010417, \"row_norms\": {\"min\": 0.079126, \"mean\": 0.617525, \"max\": 1.109364}, \"col_norms\": {\"min\": 2.57178, \"mean\": 2.942743, \"max\": 3.595754}, \"argmax_col_norm\": 2}",
+          "seconds": 0.001
+        },
+        {
+          "tool": "run_python",
+          "input": {
+            "code": "\"\"\"Read a 3D machine part out of the raw weights of a ReLU SDF network (numpy only).\n\nThis file is what an agent *submits to the sandbox* (``run_python``): it receives the raw\n``weights`` dict (``name -> ndarray``) and the ``meta`` model card, re-implements the forward\npass from the weight matrices alone, and returns a structured description of the part in\n``RESULT``. It can also be imported in-process (``read_part``) for verification loops.\n\nStrategy (the \"program comprehension\" of an SDF network):\n1. Decode the architecture from tensor names/shapes → list of (W, b).\n2. Evaluate the decoded program on a coarse grid → occupancy (sdf < 0).\n3. Refine planar extents (thickness, outline) with bisection along axis-aligned rays.\n4. Find holes in a slice just below the top face (empty regions not connected to the outside),\n   fit circles to bisection-refined boundary points, then classify each hole by probing its\n   axis (through vs. blind) and its radius profile along Z (counterbore).\n\"\"\"\n\nimport re\n\nimport numpy as np\n\n# ------------------------------------------------------------------------------------------------\n# Architecture decoding and the forward pass\n# ------------------------------------------------------------------------------------------------\n\n\ndef layers_from_weights(weights):\n    \"\"\"Group ``<prefix>.<idx>.weight`` / ``.bias`` tensors into an ordered list of (W, b).\"\"\"\n    idx = {}\n    for name in weights:\n        m = re.match(r\"^(.*?)(\\d+)\\.(weight|bias)$\", name)\n        if m:\n            idx.setdefault(int(m.group(2)), {})[m.group(3)] = np.asarray(weights[name], dtype=np.float64)\n    return [(idx[k][\"weight\"], idx[k][\"bias\"]) for k in sorted(idx)]\n\n\ndef forward(layers, x, max_floats=8_000_000):\n    \"\"\"Forward pass in float32, chunked so that no activation exceeds ``max_floats`` values.\"\"\"\n    width = max(w.shape[0] for w, _ in layers)\n    chunk = max(1024, max_floats // width)\n    out = []\n    for i in range(0, len(x), chunk):\n        h = np.asarray(x[i : i + chunk], dtype=np.float32)\n        for j, (w, b) in enumerate(layers):\n            h = h @ w.T + b\n            if j < len(layers) - 1:\n                np.maximum(h, 0.0, out=h)\n        out.append(h[:, 0])\n    return np.concatenate(out).astype(np.float64) if out else np.zeros(0)\n\n\nclass Probe:\n    \"\"\"SDF probe in millimetres that counts how many points were evaluated.\"\"\"\n\n    def __init__(self, layers, mm_per_unit):\n        self.layers = [(np.asarray(w, np.float32), np.asarray(b, np.float32)) for w, b in layers]\n        self.s, self.n_eval = float(mm_per_unit), 0\n\n    def __call__(self, p_mm):\n        p = np.atleast_2d(np.asarray(p_mm, dtype=np.float64))\n        self.n_eval += len(p)\n        return forward(self.layers, p / self.s) * self.s\n\n\ndef bisect(f, p_in, p_out, iters=30):\n    \"\"\"Boundary point on the segment between an inside (f<0) and an outside (f>=0) point.\"\"\"\n    a, b = np.asarray(p_in, float), np.asarray(p_out, float)\n    for _ in range(iters):\n        mid = 0.5 * (a + b)\n        if f(mid)[0] < 0:\n            a = mid\n        else:\n            b = mid\n    return 0.5 * (a + b)\n\n\ndef march_to_boundary(f, origin, direction, t_max, step, want_inside):\n    \"\"\"First point along a ray where ``(f<0) == want_inside``; refined by bisection.\"\"\"\n    direction = np.asarray(direction, float) / np.linalg.norm(direction)\n    ts = np.arange(step, t_max + 1e-9, step)\n    pts = np.asarray(origin, float)[None, :] + ts[:, None] * direction[None, :]\n    inside = f(pts) < 0\n    hit = np.nonzero(inside == want_inside)[0]\n    if len(hit) == 0:\n        return None\n    k = int(hit[0])\n    prev = np.asarray(origin, float) if k == 0 else pts[k - 1]\n    p_in, p_out = (pts[k], prev) if want_inside else (prev, pts[k])\n    return bisect(f, p_in, p_out)\n\n\ndef fit_circle(pts):\n    \"\"\"Algebraic (Kåsa) least-squares circle fit → (cx, cy, r, rms_residual).\"\"\"\n    x, y = pts[:, 0], pts[:, 1]\n    a = np.stack([x, y, np.ones_like(x)], axis=1)\n    sol, *_ = np.linalg.lstsq(a, x**2 + y**2, rcond=None)\n    cx, cy = sol[0] / 2, sol[1] / 2\n    r = float(np.sqrt(max(sol[2] + cx**2 + cy**2, 0.0)))\n    res = np.hypot(x - cx, y - cy) - r\n    return float(cx), float(cy), r, float(np.sqrt(np.mean(res**2)))\n\n\ndef label_components(mask):\n    \"\"\"4-connected component labelling (iterative flood fill, numpy only).\"\"\"\n    labels = np.zeros(mask.shape, dtype=np.int64)\n    current = 0\n    for seed in zip(*np.nonzero(mask), strict=True):\n        if labels[seed]:\n            continue\n        current += 1\n        stack = [seed]\n        labels[seed] = current\n        while stack:\n            i, j = stack.pop()\n            for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)):\n                a, b = i + di, j + dj\n                if 0 <= a < mask.shape[0] and 0 <= b < mask.shape[1] and mask[a, b] and not labels[a, b]:\n                    labels[a, b] = current\n                    stack.append((a, b))\n    return labels, current\n\n\n# ------------------------------------------------------------------------------------------------\n# Part reading\n# ------------------------------------------------------------------------------------------------\n\n\ndef read_part(layers, mm_per_unit=50.0, coarse_mm=1.25, slice_mm=0.5, n_rays=48):\n    f = Probe(layers, mm_per_unit)\n    half = mm_per_unit  # workspace is [-1, 1]^3 in normalised units\n    axis = np.arange(-half, half + 1e-9, coarse_mm)\n    gx, gy, gz = np.meshgrid(axis, axis, axis, indexing=\"ij\")\n    occ = (f(np.stack([gx, gy, gz], -1).reshape(-1, 3)) < 0).reshape(gx.shape)\n    if not occ.any():\n        return {\"empty\": True, \"n_eval\": f.n_eval}\n\n    # --- vertical extent: bisection along typical full-thickness columns -----------------------------\n    # The modal column fill (not the max, which picks up local bulges of the fitted field) identifies\n    # ordinary full-thickness material; 15 columns spread over it give a robust median.\n    column_fill = occ.sum(axis=2)\n    fills, counts = np.unique(column_fill[column_fill > 0], return_counts=True)\n    full = np.argwhere(column_fill == fills[np.argmax(counts)])\n    picks = full[np.linspace(0, len(full) - 1, min(15, len(full))).astype(int)]\n    tops, bots = [], []\n    for i, j in picks:\n        ks = np.nonzero(occ[i, j])[0]\n        x0, y0, z_in = axis[i], axis[j], axis[ks[len(ks) // 2]]\n        tops.append(bisect(f, [x0, y0, z_in], [x0, y0, min(axis[ks[-1]] + coarse_mm, half)])[2])\n        bots.append(bisect(f, [x0, y0, z_in], [x0, y0, max(axis[ks[0]] - coarse_mm, -half)])[2])\n    z_top, z_bot = float(np.median(tops)), float(np.median(bots))\n    thickness = z_top - z_bot\n\n    # --- top-view slice just below the top face ---------------------------------------------------\n    z_probe = z_top - 0.2 * thickness\n    ii, jj = np.nonzero(occ.any(axis=2))\n    lo = np.array([axis[ii.min()] - 2 * coarse_mm, axis[jj.min()] - 2 * coarse_mm])\n    hi = np.array([axis[ii.max()] + 2 * coarse_mm, axis[jj.max()] + 2 * coarse_mm])\n    sx = np.arange(lo[0], hi[0] + 1e-9, slice_mm)\n    sy = np.arange(lo[1], hi[1] + 1e-9, slice_mm)\n    px, py = np.meshgrid(sx, sy, indexing=\"ij\")\n    sl = np.stack([px, py, np.full_like(px, z_probe)], -1).reshape(-1, 3)\n    solid = (f(sl) < 0).reshape(px.shape)\n\n    empty_labels, n_lab = label_components(~solid)\n    border = set(\n        np.unique(np.concatenate([empty_labels[0], empty_labels[-1], empty_labels[:, 0], empty_labels[:, -1]]))\n    )\n    filled = solid.copy()\n    hole_regions = []\n    for lab in range(1, n_lab + 1):\n        if lab in border:\n            continue\n        region = empty_labels == lab\n        filled |= region\n        if region.sum() * slice_mm**2 > 4.0:  # ignore specks < 4 mm^2\n            hole_regions.append(region)\n\n    # --- outline: rectangle vs disk from the fill ratio of the hole-free footprint ---------------\n    fi, fj = np.nonzero(filled)\n    ext_x = (sx[fi.min()], sx[fi.max()])\n    ext_y = (sy[fj.min()], sy[fj.max()])\n    cx0, cy0 = filled_centroid = (float(px[filled].mean()), float(py[filled].mean()))\n    z_mid = 0.5 * (z_top + z_bot)\n\n    # refine extents: march *inward* from outside along the X / Y lines through the footprint\n    # centroid, so that the first boundary met is the outer contour (not a hole wall)\n    def edge(start, direction, length):\n        p = march_to_boundary(f, start, direction, length, 0.25, True)\n        return start if p is None else p\n\n    span_x, span_y = ext_x[1] - ext_x[0] + 4 * slice_mm, ext_y[1] - ext_y[0] + 4 * slice_mm\n    xmax = edge([ext_x[1] + 2 * slice_mm, cy0, z_mid], [-1.0, 0, 0], span_x)[0]\n    xmin = edge([ext_x[0] - 2 * slice_mm, cy0, z_mid], [1.0, 0, 0], span_x)[0]\n    ymax = edge([cx0, ext_y[1] + 2 * slice_mm, z_mid], [0, -1.0, 0], span_y)[1]\n    ymin = edge([cx0, ext_y[0] - 2 * slice_mm, z_mid], [0, 1.0, 0], span_y)[1]\n    bbox_area = (ext_x[1] - ext_x[0] + slice_mm) * (ext_y[1] - ext_y[0] + slice_mm)\n    fill_ratio = float(filled.sum() * slice_mm**2 / bbox_area)\n    outline = \"rect\" if fill_ratio > 0.9 else \"disk\"\n\n    # --- holes ----------------------------------------------------------------------------------\n    holes = []\n    z_low = z_bot + 0.2 * thickness\n    for region in sorted(hole_regions, key=lambda r: -r.sum()):\n        hx, hy = float(px[region].mean()), float(py[region].mean())\n        r_eq = float(np.sqrt(region.sum() * slice_mm**2 / np.pi))\n        reach = 3.0 * r_eq + 5.0\n\n        def ring(z, hx=hx, hy=hy, reach=reach):\n            pts = []\n            for th in np.linspace(0, 2 * np.pi, n_rays, endpoint=False):\n                p = march_to_boundary(f, [hx, hy, z], [np.cos(th), np.sin(th), 0.0], reach, 0.25, True)\n                if p is not None:\n                    pts.append(p[:2])\n            return fit_circle(np.array(pts)) if len(pts) >= 8 else None\n\n        top = ring(z_probe)\n        if top is None:\n            continue\n        cx, cy, r_top, rms = top\n        # through vs blind: march down the axis from the probe slice, looking for material\n        floor = march_to_boundary(f, [cx, cy, z_probe], [0, 0, -1.0], z_probe - z_bot + 1.0, 0.25, True)\n        through = floor is None or floor[2] <= z_bot + 0.05 * thickness\n        hole = {\n            \"cx\": cx,\n            \"cy\": cy,\n            \"radius\": r_top,\n            \"through\": bool(through),\n            \"depth\": None,\n            \"cb_radius\": None,\n            \"cb_depth\": None,\n            \"circle_rms_mm\": rms,\n        }\n        # Radii are re-measured in the middle of each cylindrical segment: near the faces the\n        # fitted network rounds the edges, which biases ring measurements.\n        if not through:\n            z_floor = float(floor[2])\n            hole[\"depth\"] = float(z_top - z_floor)\n            mid = ring(0.5 * (z_top + z_floor))\n            if mid is not None:\n                hole.update(cx=mid[0], cy=mid[1], radius=mid[2], circle_rms_mm=mid[3])\n        else:\n            low = ring(z_low)\n            if low is not None and r_top > 1.2 * low[2]:\n                # counterbore: the probe slice cuts the counterbore; the low slice the hole itself\n                r_mid = 0.5 * (r_top + low[2])\n                cb_floor = march_to_boundary(f, [low[0] + r_mid, low[1], z_probe], [0, 0, -1.0], thickness, 0.25, True)\n                z_cb = float(cb_floor[2]) if cb_floor is not None else z_mid\n                inner = ring(0.5 * (z_bot + z_cb)) or low\n                outer = ring(0.5 * (z_top + z_cb)) or top\n                hole.update(\n                    cx=inner[0],\n                    cy=inner[1],\n                    radius=inner[2],\n                    circle_rms_mm=inner[3],\n                    cb_radius=outer[2],\n                    cb_depth=None if cb_floor is None else float(z_top - z_cb),\n                )\n            else:\n                mid = ring(z_mid)\n                if mid is not None:\n                    hole.update(cx=mid[0], cy=mid[1], radius=mid[2], circle_rms_mm=mid[3])\n        holes.append(hole)\n\n    if outline == \"disk\":\n        family = \"flange\"\n    elif not holes:\n        family = \"plate\"\n    elif holes[0][\"cb_radius\"] is not None:\n        family = \"counterbore\"\n    elif not holes[0][\"through\"]:\n        family = \"blind_hole\"\n    else:\n        family = \"through_hole\"\n\n    return {\n        \"family\": family,\n        \"outline\": outline,\n        \"size_x\": float(xmax - xmin),\n        \"size_y\": float(ymax - ymin),\n        \"center_x\": float(0.5 * (xmax + xmin)),\n        \"center_y\": float(0.5 * (ymax + ymin)),\n        \"thickness\": float(thickness),\n        \"z_bottom\": float(z_bot),\n        \"z_top\": float(z_top),\n        \"holes\": holes,\n        \"footprint_fill_ratio\": fill_ratio,\n        \"footprint_centroid\": [round(v, 3) for v in filled_centroid],\n        \"n_eval\": f.n_eval,\n    }\n\n\ndef architecture(layers):\n    return {\n        \"n_layers\": len(layers),\n        \"shapes\": [list(w.shape) for w, _ in layers],\n        \"n_params\": int(sum(w.size + b.size for w, b in layers)),\n        \"first_layer_axis_norms\": np.linalg.norm(layers[0][0], axis=0).round(3).tolist(),\n    }\n\n\nif __name__ == \"__sandbox__\":  # executed inside the sandbox: `weights` and `meta` are injected\n    _layers = layers_from_weights(weights)\n    RESULT = {\"architecture\": architecture(_layers), **read_part(_layers, meta.get(\"mm_per_unit\", 50.0))}\n"
+          },
+          "ok": true,
+          "output": "{\"ok\": true, \"stdout\": \"\", \"error\": null, \"result\": {\"architecture\": {\"n_layers\": 4, \"shapes\": [[64, 3], [64, 64], [64, 64], [1, 64]], \"n_params\": 8641, \"first_layer_axis_norms\": [2.572, 2.661, 3.596]}, \"family\": \"blind_hole\", \"outline\": \"rect\", \"size_x\": 72.47887551761232, \"size_y\": 59.492096305126324, \"center_x\": 0.012391805648803711, \"center_y\": -0.011262297630310059, \"thickness\": 11.962117813527584, \"z_bottom\": -4.9488434550585225, \"z_top\": 7.0132743584690616, \"holes\": [{\"cx\": 12.53299044404",
+          "seconds": 4.385
+        },
+        {
+          "tool": "submit_reading",
+          "input": {
+            "family": "blind_hole",
+            "outline": "rect",
+            "size_x": 72.47887551761232,
+            "size_y": 59.492096305126324,
+            "thickness": 11.962117813527584,
+            "z_bottom": -4.9488434550585225,
+            "holes": [
+              {
+                "cx": 12.532990444042927,
+                "cy": 2.5102851024732358,
+                "radius": 11.170690796900548,
+                "through": false,
+                "depth": 7.02747261186596,
+                "cb_radius": null,
+                "cb_depth": null
+              }
+            ],
+            "rationale": "architecture [[64, 3], [64, 64], [64, 64], [1, 64]] (8641 params) decoded from 8 tensors; first-layer column norms (x, y, z) = {'min': 2.57178, 'mean': 2.942743, 'max': 3.595754}\ntop-view footprint fill ratio 0.991 → outline 'rect' (rectangle ≈ 1.0, disk ≈ π/4 ≈ 0.785)\nthickness 11.96 mm: median of Z bisections along typical full-thickness columns\nhole 0: empty region enclosed by material below the top face; circle fit to bisected boundary points → centre (12.53, 2.51), R11.17 mm (rms 0.201); blind, depth 7.03 mm (material found on the axis)\n570557 field evaluations of the decoded program (numpy, in the sandbox)"
+          },
+          "ok": true,
+          "output": "{\"status\": \"accepted\"}",
+          "seconds": 0.0
+        }
+      ]
+    }
+  },
+  {
+    "part": "blind_hole_1",
+    "spec": {
+      "name": "blind_hole_1",
+      "outline": "rect",
+      "size_x": 62.5,
+      "size_y": 68.0,
+      "thickness": 12.0,
+      "z_bottom": -6.5,
+      "center_x": 0.0,
+      "center_y": 0.0,
+      "holes": [
+        {
+          "cx": -4.0,
+          "cy": -0.5,
+          "radius": 8.5,
+          "depth": 7.5,
+          "cb_radius": null,
+          "cb_depth": null
+        }
+      ],
+      "family": "blind_hole"
+    },
+    "fit_seconds": 13.982714177999696,
+    "score": {
+      "answered": true,
+      "family_gt": "blind_hole",
+      "family_pred": "blind_hole",
+      "family_correct": true,
+      "size_x_err": 0.030797719955444336,
+      "size_y_err": 0.004494905471801758,
+      "thickness_err": 0.029378834762610495,
+      "z_bottom_err": 0.03143237414769828,
+      "hole_count_correct": true,
+      "center_err": 0.12410726813028862,
+      "radius_err": 0.4522344381298513,
+      "through_correct": true,
+      "depth_err": 0.23025499936193228
+    },
+    "seconds": 4.000312453999868,
+    "n_tool_calls": 4,
+    "agent_result": {
+      "agent": "scripted",
+      "finished": true,
+      "n_tool_calls": 4,
+      "usage": {},
+      "stop_reason": "finished",
+      "notes": [],
+      "final_answer": {
+        "family": "blind_hole",
+        "outline": "rect",
+        "size_x": 62.530797719955444,
+        "size_y": 68.0044949054718,
+        "thickness": 11.97062116523739,
+        "z_bottom": -6.468567625852302,
+        "holes": [
+          {
+            "cx": -4.013764798035099,
+            "cy": -0.37665842413112965,
+            "radius": 8.952234438129851,
+            "through": false,
+            "depth": 7.730254999361932,
+            "cb_radius": null,
+            "cb_depth": null
+          }
+        ],
+        "rationale": "architecture [[64, 3], [64, 64], [64, 64], [1, 64]] (8641 params) decoded from 8 tensors; first-layer column norms (x, y, z) = {'min': 2.537875, 'mean': 2.928393, 'max': 3.629605}\ntop-view footprint fill ratio 0.990 → outline 'rect' (rectangle ≈ 1.0, disk ≈ π/4 ≈ 0.785)\nthickness 11.97 mm: median of Z bisections along typical full-thickness columns\nhole 0: empty region enclosed by material below the top face; circle fit to bisected boundary points → centre (-4.01, -0.38), R8.95 mm (rms 0.364); blind, depth 7.73 mm (material found on the axis)\n567765 field evaluations of the decoded program (numpy, in the sandbox)"
+      },
+      "transcript": [
+        {
+          "tool": "list_parameters",
+          "input": {},
+          "ok": true,
+          "output": "[{\"name\": \"net.0.weight\", \"shape\": [64, 3], \"numel\": 192, \"dtype\": \"float32\"}, {\"name\": \"net.0.bias\", \"shape\": [64], \"numel\": 64, \"dtype\": \"float32\"}, {\"name\": \"net.2.weight\", \"shape\": [64, 64], \"numel\": 4096, \"dtype\": \"float32\"}, {\"name\": \"net.2.bias\", \"shape\": [64], \"numel\": 64, \"dtype\": \"float32\"}, {\"name\": \"net.4.weight\", \"shape\": [64, 64], \"numel\": 4096, \"dtype\": \"float32\"}, {\"name\": \"net.4.bias\", \"shape\": [64], \"numel\": 64, \"dtype\": \"float32\"}, {\"name\": \"net.6.weight\", \"shape\": [1, 64], \"n",
+          "seconds": 0.0
+        },
+        {
+          "tool": "tensor_stats",
+          "input": {
+            "name": "net.0.weight"
+          },
+          "ok": true,
+          "output": "{\"name\": \"net.0.weight\", \"shape\": [64, 3], \"mean\": -0.019756, \"std\": 0.371725, \"min\": -0.69636, \"max\": 0.845778, \"l2\": 5.144627, \"abs_mean\": 0.309834, \"frac_near_zero\": 0.0, \"row_norms\": {\"min\": 0.079126, \"mean\": 0.618855, \"max\": 0.943152}, \"col_norms\": {\"min\": 2.537875, \"mean\": 2.928393, \"max\": 3.629605}, \"argmax_col_norm\": 2}",
+          "seconds": 0.001
+        },
+        {
+          "tool": "run_python",
+          "input": {
+            "code": "\"\"\"Read a 3D machine part out of the raw weights of a ReLU SDF network (numpy only).\n\nThis file is what an agent *submits to the sandbox* (``run_python``): it receives the raw\n``weights`` dict (``name -> ndarray``) and the ``meta`` model card, re-implements the forward\npass from the weight matrices alone, and returns a structured description of the part in\n``RESULT``. It can also be imported in-process (``read_part``) for verification loops.\n\nStrategy (the \"program comprehension\" of an SDF network):\n1. Decode the architecture from tensor names/shapes → list of (W, b).\n2. Evaluate the decoded program on a coarse grid → occupancy (sdf < 0).\n3. Refine planar extents (thickness, outline) with bisection along axis-aligned rays.\n4. Find holes in a slice just below the top face (empty regions not connected to the outside),\n   fit circles to bisection-refined boundary points, then classify each hole by probing its\n   axis (through vs. blind) and its radius profile along Z (counterbore).\n\"\"\"\n\nimport re\n\nimport numpy as np\n\n# ------------------------------------------------------------------------------------------------\n# Architecture decoding and the forward pass\n# ------------------------------------------------------------------------------------------------\n\n\ndef layers_from_weights(weights):\n    \"\"\"Group ``<prefix>.<idx>.weight`` / ``.bias`` tensors into an ordered list of (W, b).\"\"\"\n    idx = {}\n    for name in weights:\n        m = re.match(r\"^(.*?)(\\d+)\\.(weight|bias)$\", name)\n        if m:\n            idx.setdefault(int(m.group(2)), {})[m.group(3)] = np.asarray(weights[name], dtype=np.float64)\n    return [(idx[k][\"weight\"], idx[k][\"bias\"]) for k in sorted(idx)]\n\n\ndef forward(layers, x, max_floats=8_000_000):\n    \"\"\"Forward pass in float32, chunked so that no activation exceeds ``max_floats`` values.\"\"\"\n    width = max(w.shape[0] for w, _ in layers)\n    chunk = max(1024, max_floats // width)\n    out = []\n    for i in range(0, len(x), chunk):\n        h = np.asarray(x[i : i + chunk], dtype=np.float32)\n        for j, (w, b) in enumerate(layers):\n            h = h @ w.T + b\n            if j < len(layers) - 1:\n                np.maximum(h, 0.0, out=h)\n        out.append(h[:, 0])\n    return np.concatenate(out).astype(np.float64) if out else np.zeros(0)\n\n\nclass Probe:\n    \"\"\"SDF probe in millimetres that counts how many points were evaluated.\"\"\"\n\n    def __init__(self, layers, mm_per_unit):\n        self.layers = [(np.asarray(w, np.float32), np.asarray(b, np.float32)) for w, b in layers]\n        self.s, self.n_eval = float(mm_per_unit), 0\n\n    def __call__(self, p_mm):\n        p = np.atleast_2d(np.asarray(p_mm, dtype=np.float64))\n        self.n_eval += len(p)\n        return forward(self.layers, p / self.s) * self.s\n\n\ndef bisect(f, p_in, p_out, iters=30):\n    \"\"\"Boundary point on the segment between an inside (f<0) and an outside (f>=0) point.\"\"\"\n    a, b = np.asarray(p_in, float), np.asarray(p_out, float)\n    for _ in range(iters):\n        mid = 0.5 * (a + b)\n        if f(mid)[0] < 0:\n            a = mid\n        else:\n            b = mid\n    return 0.5 * (a + b)\n\n\ndef march_to_boundary(f, origin, direction, t_max, step, want_inside):\n    \"\"\"First point along a ray where ``(f<0) == want_inside``; refined by bisection.\"\"\"\n    direction = np.asarray(direction, float) / np.linalg.norm(direction)\n    ts = np.arange(step, t_max + 1e-9, step)\n    pts = np.asarray(origin, float)[None, :] + ts[:, None] * direction[None, :]\n    inside = f(pts) < 0\n    hit = np.nonzero(inside == want_inside)[0]\n    if len(hit) == 0:\n        return None\n    k = int(hit[0])\n    prev = np.asarray(origin, float) if k == 0 else pts[k - 1]\n    p_in, p_out = (pts[k], prev) if want_inside else (prev, pts[k])\n    return bisect(f, p_in, p_out)\n\n\ndef fit_circle(pts):\n    \"\"\"Algebraic (Kåsa) least-squares circle fit → (cx, cy, r, rms_residual).\"\"\"\n    x, y = pts[:, 0], pts[:, 1]\n    a = np.stack([x, y, np.ones_like(x)], axis=1)\n    sol, *_ = np.linalg.lstsq(a, x**2 + y**2, rcond=None)\n    cx, cy = sol[0] / 2, sol[1] / 2\n    r = float(np.sqrt(max(sol[2] + cx**2 + cy**2, 0.0)))\n    res = np.hypot(x - cx, y - cy) - r\n    return float(cx), float(cy), r, float(np.sqrt(np.mean(res**2)))\n\n\ndef label_components(mask):\n    \"\"\"4-connected component labelling (iterative flood fill, numpy only).\"\"\"\n    labels = np.zeros(mask.shape, dtype=np.int64)\n    current = 0\n    for seed in zip(*np.nonzero(mask), strict=True):\n        if labels[seed]:\n            continue\n        current += 1\n        stack = [seed]\n        labels[seed] = current\n        while stack:\n            i, j = stack.pop()\n            for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)):\n                a, b = i + di, j + dj\n                if 0 <= a < mask.shape[0] and 0 <= b < mask.shape[1] and mask[a, b] and not labels[a, b]:\n                    labels[a, b] = current\n                    stack.append((a, b))\n    return labels, current\n\n\n# ------------------------------------------------------------------------------------------------\n# Part reading\n# ------------------------------------------------------------------------------------------------\n\n\ndef read_part(layers, mm_per_unit=50.0, coarse_mm=1.25, slice_mm=0.5, n_rays=48):\n    f = Probe(layers, mm_per_unit)\n    half = mm_per_unit  # workspace is [-1, 1]^3 in normalised units\n    axis = np.arange(-half, half + 1e-9, coarse_mm)\n    gx, gy, gz = np.meshgrid(axis, axis, axis, indexing=\"ij\")\n    occ = (f(np.stack([gx, gy, gz], -1).reshape(-1, 3)) < 0).reshape(gx.shape)\n    if not occ.any():\n        return {\"empty\": True, \"n_eval\": f.n_eval}\n\n    # --- vertical extent: bisection along typical full-thickness columns -----------------------------\n    # The modal column fill (not the max, which picks up local bulges of the fitted field) identifies\n    # ordinary full-thickness material; 15 columns spread over it give a robust median.\n    column_fill = occ.sum(axis=2)\n    fills, counts = np.unique(column_fill[column_fill > 0], return_counts=True)\n    full = np.argwhere(column_fill == fills[np.argmax(counts)])\n    picks = full[np.linspace(0, len(full) - 1, min(15, len(full))).astype(int)]\n    tops, bots = [], []\n    for i, j in picks:\n        ks = np.nonzero(occ[i, j])[0]\n        x0, y0, z_in = axis[i], axis[j], axis[ks[len(ks) // 2]]\n        tops.append(bisect(f, [x0, y0, z_in], [x0, y0, min(axis[ks[-1]] + coarse_mm, half)])[2])\n        bots.append(bisect(f, [x0, y0, z_in], [x0, y0, max(axis[ks[0]] - coarse_mm, -half)])[2])\n    z_top, z_bot = float(np.median(tops)), float(np.median(bots))\n    thickness = z_top - z_bot\n\n    # --- top-view slice just below the top face ---------------------------------------------------\n    z_probe = z_top - 0.2 * thickness\n    ii, jj = np.nonzero(occ.any(axis=2))\n    lo = np.array([axis[ii.min()] - 2 * coarse_mm, axis[jj.min()] - 2 * coarse_mm])\n    hi = np.array([axis[ii.max()] + 2 * coarse_mm, axis[jj.max()] + 2 * coarse_mm])\n    sx = np.arange(lo[0], hi[0] + 1e-9, slice_mm)\n    sy = np.arange(lo[1], hi[1] + 1e-9, slice_mm)\n    px, py = np.meshgrid(sx, sy, indexing=\"ij\")\n    sl = np.stack([px, py, np.full_like(px, z_probe)], -1).reshape(-1, 3)\n    solid = (f(sl) < 0).reshape(px.shape)\n\n    empty_labels, n_lab = label_components(~solid)\n    border = set(\n        np.unique(np.concatenate([empty_labels[0], empty_labels[-1], empty_labels[:, 0], empty_labels[:, -1]]))\n    )\n    filled = solid.copy()\n    hole_regions = []\n    for lab in range(1, n_lab + 1):\n        if lab in border:\n            continue\n        region = empty_labels == lab\n        filled |= region\n        if region.sum() * slice_mm**2 > 4.0:  # ignore specks < 4 mm^2\n            hole_regions.append(region)\n\n    # --- outline: rectangle vs disk from the fill ratio of the hole-free footprint ---------------\n    fi, fj = np.nonzero(filled)\n    ext_x = (sx[fi.min()], sx[fi.max()])\n    ext_y = (sy[fj.min()], sy[fj.max()])\n    cx0, cy0 = filled_centroid = (float(px[filled].mean()), float(py[filled].mean()))\n    z_mid = 0.5 * (z_top + z_bot)\n\n    # refine extents: march *inward* from outside along the X / Y lines through the footprint\n    # centroid, so that the first boundary met is the outer contour (not a hole wall)\n    def edge(start, direction, length):\n        p = march_to_boundary(f, start, direction, length, 0.25, True)\n        return start if p is None else p\n\n    span_x, span_y = ext_x[1] - ext_x[0] + 4 * slice_mm, ext_y[1] - ext_y[0] + 4 * slice_mm\n    xmax = edge([ext_x[1] + 2 * slice_mm, cy0, z_mid], [-1.0, 0, 0], span_x)[0]\n    xmin = edge([ext_x[0] - 2 * slice_mm, cy0, z_mid], [1.0, 0, 0], span_x)[0]\n    ymax = edge([cx0, ext_y[1] + 2 * slice_mm, z_mid], [0, -1.0, 0], span_y)[1]\n    ymin = edge([cx0, ext_y[0] - 2 * slice_mm, z_mid], [0, 1.0, 0], span_y)[1]\n    bbox_area = (ext_x[1] - ext_x[0] + slice_mm) * (ext_y[1] - ext_y[0] + slice_mm)\n    fill_ratio = float(filled.sum() * slice_mm**2 / bbox_area)\n    outline = \"rect\" if fill_ratio > 0.9 else \"disk\"\n\n    # --- holes ----------------------------------------------------------------------------------\n    holes = []\n    z_low = z_bot + 0.2 * thickness\n    for region in sorted(hole_regions, key=lambda r: -r.sum()):\n        hx, hy = float(px[region].mean()), float(py[region].mean())\n        r_eq = float(np.sqrt(region.sum() * slice_mm**2 / np.pi))\n        reach = 3.0 * r_eq + 5.0\n\n        def ring(z, hx=hx, hy=hy, reach=reach):\n            pts = []\n            for th in np.linspace(0, 2 * np.pi, n_rays, endpoint=False):\n                p = march_to_boundary(f, [hx, hy, z], [np.cos(th), np.sin(th), 0.0], reach, 0.25, True)\n                if p is not None:\n                    pts.append(p[:2])\n            return fit_circle(np.array(pts)) if len(pts) >= 8 else None\n\n        top = ring(z_probe)\n        if top is None:\n            continue\n        cx, cy, r_top, rms = top\n        # through vs blind: march down the axis from the probe slice, looking for material\n        floor = march_to_boundary(f, [cx, cy, z_probe], [0, 0, -1.0], z_probe - z_bot + 1.0, 0.25, True)\n        through = floor is None or floor[2] <= z_bot + 0.05 * thickness\n        hole = {\n            \"cx\": cx,\n            \"cy\": cy,\n            \"radius\": r_top,\n            \"through\": bool(through),\n            \"depth\": None,\n            \"cb_radius\": None,\n            \"cb_depth\": None,\n            \"circle_rms_mm\": rms,\n        }\n        # Radii are re-measured in the middle of each cylindrical segment: near the faces the\n        # fitted network rounds the edges, which biases ring measurements.\n        if not through:\n            z_floor = float(floor[2])\n            hole[\"depth\"] = float(z_top - z_floor)\n            mid = ring(0.5 * (z_top + z_floor))\n            if mid is not None:\n                hole.update(cx=mid[0], cy=mid[1], radius=mid[2], circle_rms_mm=mid[3])\n        else:\n            low = ring(z_low)\n            if low is not None and r_top > 1.2 * low[2]:\n                # counterbore: the probe slice cuts the counterbore; the low slice the hole itself\n                r_mid = 0.5 * (r_top + low[2])\n                cb_floor = march_to_boundary(f, [low[0] + r_mid, low[1], z_probe], [0, 0, -1.0], thickness, 0.25, True)\n                z_cb = float(cb_floor[2]) if cb_floor is not None else z_mid\n                inner = ring(0.5 * (z_bot + z_cb)) or low\n                outer = ring(0.5 * (z_top + z_cb)) or top\n                hole.update(\n                    cx=inner[0],\n                    cy=inner[1],\n                    radius=inner[2],\n                    circle_rms_mm=inner[3],\n                    cb_radius=outer[2],\n                    cb_depth=None if cb_floor is None else float(z_top - z_cb),\n                )\n            else:\n                mid = ring(z_mid)\n                if mid is not None:\n                    hole.update(cx=mid[0], cy=mid[1], radius=mid[2], circle_rms_mm=mid[3])\n        holes.append(hole)\n\n    if outline == \"disk\":\n        family = \"flange\"\n    elif not holes:\n        family = \"plate\"\n    elif holes[0][\"cb_radius\"] is not None:\n        family = \"counterbore\"\n    elif not holes[0][\"through\"]:\n        family = \"blind_hole\"\n    else:\n        family = \"through_hole\"\n\n    return {\n        \"family\": family,\n        \"outline\": outline,\n        \"size_x\": float(xmax - xmin),\n        \"size_y\": float(ymax - ymin),\n        \"center_x\": float(0.5 * (xmax + xmin)),\n        \"center_y\": float(0.5 * (ymax + ymin)),\n        \"thickness\": float(thickness),\n        \"z_bottom\": float(z_bot),\n        \"z_top\": float(z_top),\n        \"holes\": holes,\n        \"footprint_fill_ratio\": fill_ratio,\n        \"footprint_centroid\": [round(v, 3) for v in filled_centroid],\n        \"n_eval\": f.n_eval,\n    }\n\n\ndef architecture(layers):\n    return {\n        \"n_layers\": len(layers),\n        \"shapes\": [list(w.shape) for w, _ in layers],\n        \"n_params\": int(sum(w.size + b.size for w, b in layers)),\n        \"first_layer_axis_norms\": np.linalg.norm(layers[0][0], axis=0).round(3).tolist(),\n    }\n\n\nif __name__ == \"__sandbox__\":  # executed inside the sandbox: `weights` and `meta` are injected\n    _layers = layers_from_weights(weights)\n    RESULT = {\"architecture\": architecture(_layers), **read_part(_layers, meta.get(\"mm_per_unit\", 50.0))}\n"
+          },
+          "ok": true,
+          "output": "{\"ok\": true, \"stdout\": \"\", \"error\": null, \"result\": {\"architecture\": {\"n_layers\": 4, \"shapes\": [[64, 3], [64, 64], [64, 64], [1, 64]], \"n_params\": 8641, \"first_layer_axis_norms\": [2.538, 2.618, 3.63]}, \"family\": \"blind_hole\", \"outline\": \"rect\", \"size_x\": 62.530797719955444, \"size_y\": 68.0044949054718, \"center_x\": 0.007946789148263633, \"center_y\": -0.007794797536917031, \"thickness\": 11.97062116523739, \"z_bottom\": -6.468567625852302, \"z_top\": 5.502053539385088, \"holes\": [{\"cx\": -4.013764798035099,",
+          "seconds": 3.999
+        },
+        {
+          "tool": "submit_reading",
+          "input": {
+            "family": "blind_hole",
+            "outline": "rect",
+            "size_x": 62.530797719955444,
+            "size_y": 68.0044949054718,
+            "thickness": 11.97062116523739,
+            "z_bottom": -6.468567625852302,
+            "holes": [
+              {
+                "cx": -4.013764798035099,
+                "cy": -0.37665842413112965,
+                "radius": 8.952234438129851,
+                "through": false,
+                "depth": 7.730254999361932,
+                "cb_radius": null,
+                "cb_depth": null
+              }
+            ],
+            "rationale": "architecture [[64, 3], [64, 64], [64, 64], [1, 64]] (8641 params) decoded from 8 tensors; first-layer column norms (x, y, z) = {'min': 2.537875, 'mean': 2.928393, 'max': 3.629605}\ntop-view footprint fill ratio 0.990 → outline 'rect' (rectangle ≈ 1.0, disk ≈ π/4 ≈ 0.785)\nthickness 11.97 mm: median of Z bisections along typical full-thickness columns\nhole 0: empty region enclosed by material below the top face; circle fit to bisected boundary points → centre (-4.01, -0.38), R8.95 mm (rms 0.364); blind, depth 7.73 mm (material found on the axis)\n567765 field evaluations of the decoded program (numpy, in the sandbox)"
+          },
+          "ok": true,
+          "output": "{\"status\": \"accepted\"}",
+          "seconds": 0.0
+        }
+      ]
+    }
+  },
+  {
+    "part": "counterbore_0",
+    "spec": {
+      "name": "counterbore_0",
+      "outline": "rect",
+      "size_x": 71.5,
+      "size_y": 58.0,
+      "thickness": 13.5,
+      "z_bottom": -7.5,
+      "center_x": 0.0,
+      "center_y": 0.0,
+      "holes": [
+        {
+          "cx": -5.0,
+          "cy": -1.5,
+          "radius": 7.0,
+          "depth": null,
+          "cb_radius": 11.5,
+          "cb_depth": 6.0
+        }
+      ],
+      "family": "counterbore"
+    },
+    "fit_seconds": 14.721104525000555,
+    "score": {
+      "answered": true,
+      "family_gt": "counterbore",
+      "family_pred": "counterbore",
+      "family_correct": true,
+      "size_x_err": 0.002961992984637618,
+      "size_y_err": 0.02136397361755371,
+      "thickness_err": 0.05029139667749405,
+      "z_bottom_err": 0.03025897196494043,
+      "hole_count_correct": true,
+      "center_err": 0.15453376627755105,
+      "radius_err": 0.22678973856220885,
+      "through_correct": true,
+      "cb_radius_err": 0.07537704186806238,
+      "cb_depth_err": 0.2618409366114065
+    },
+    "seconds": 3.9595837739998387,
+    "n_tool_calls": 4,
+    "agent_result": {
+      "agent": "scripted",
+      "finished": true,
+      "n_tool_calls": 4,
+      "usage": {},
+      "stop_reason": "finished",
+      "notes": [],
+      "final_answer": {
+        "family": "counterbore",
+        "outline": "rect",
+        "size_x": 71.49703800701536,
+        "size_y": 57.978636026382446,
+        "thickness": 13.550291396677494,
+        "z_bottom": -7.53025897196494,
+        "holes": [
+          {
+            "cx": -4.942492544067648,
+            "cy": -1.6434349240321666,
+            "radius": 6.773210261437791,
+            "through": true,
+            "depth": null,
+            "cb_radius": 11.575377041868062,
+            "cb_depth": 6.2618409366114065
+          }
+        ],
+        "rationale": "architecture [[64, 3], [64, 64], [64, 64], [1, 64]] (8641 params) decoded from 8 tensors; first-layer column norms (x, y, z) = {'min': 2.590656, 'mean': 2.894614, 'max': 3.377752}\ntop-view footprint fill ratio 1.000 → outline 'rect' (rectangle ≈ 1.0, disk ≈ π/4 ≈ 0.785)\nthickness 13.55 mm: median of Z bisections along typical full-thickness columns\nhole 0: empty region enclosed by material below the top face; circle fit to bisected boundary points → centre (-4.94, -1.64), R6.77 mm (rms 0.203); through, counterbore R11.58 depth 6.26 mm (radius step along Z)\n588774 field evaluations of the decoded program (numpy, in the sandbox)"
+      },
+      "transcript": [
+        {
+          "tool": "list_parameters",
+          "input": {},
+          "ok": true,
+          "output": "[{\"name\": \"net.0.weight\", \"shape\": [64, 3], \"numel\": 192, \"dtype\": \"float32\"}, {\"name\": \"net.0.bias\", \"shape\": [64], \"numel\": 64, \"dtype\": \"float32\"}, {\"name\": \"net.2.weight\", \"shape\": [64, 64], \"numel\": 4096, \"dtype\": \"float32\"}, {\"name\": \"net.2.bias\", \"shape\": [64], \"numel\": 64, \"dtype\": \"float32\"}, {\"name\": \"net.4.weight\", \"shape\": [64, 64], \"numel\": 4096, \"dtype\": \"float32\"}, {\"name\": \"net.4.bias\", \"shape\": [64], \"numel\": 64, \"dtype\": \"float32\"}, {\"name\": \"net.6.weight\", \"shape\": [1, 64], \"n",
+          "seconds": 0.0
+        },
+        {
+          "tool": "tensor_stats",
+          "input": {
+            "name": "net.0.weight"
+          },
+          "ok": true,
+          "output": "{\"name\": \"net.0.weight\", \"shape\": [64, 3], \"mean\": -0.02164, \"std\": 0.364702, \"min\": -0.727401, \"max\": 0.808681, \"l2\": 5.049187, \"abs_mean\": 0.302818, \"frac_near_zero\": 0.0, \"row_norms\": {\"min\": 0.079126, \"mean\": 0.604676, \"max\": 0.949817}, \"col_norms\": {\"min\": 2.590656, \"mean\": 2.894614, \"max\": 3.377752}, \"argmax_col_norm\": 2}",
+          "seconds": 0.001
+        },
+        {
+          "tool": "run_python",
+          "input": {
+            "code": "\"\"\"Read a 3D machine part out of the raw weights of a ReLU SDF network (numpy only).\n\nThis file is what an agent *submits to the sandbox* (``run_python``): it receives the raw\n``weights`` dict (``name -> ndarray``) and the ``meta`` model card, re-implements the forward\npass from the weight matrices alone, and returns a structured description of the part in\n``RESULT``. It can also be imported in-process (``read_part``) for verification loops.\n\nStrategy (the \"program comprehension\" of an SDF network):\n1. Decode the architecture from tensor names/shapes → list of (W, b).\n2. Evaluate the decoded program on a coarse grid → occupancy (sdf < 0).\n3. Refine planar extents (thickness, outline) with bisection along axis-aligned rays.\n4. Find holes in a slice just below the top face (empty regions not connected to the outside),\n   fit circles to bisection-refined boundary points, then classify each hole by probing its\n   axis (through vs. blind) and its radius profile along Z (counterbore).\n\"\"\"\n\nimport re\n\nimport numpy as np\n\n# ------------------------------------------------------------------------------------------------\n# Architecture decoding and the forward pass\n# ------------------------------------------------------------------------------------------------\n\n\ndef layers_from_weights(weights):\n    \"\"\"Group ``<prefix>.<idx>.weight`` / ``.bias`` tensors into an ordered list of (W, b).\"\"\"\n    idx = {}\n    for name in weights:\n        m = re.match(r\"^(.*?)(\\d+)\\.(weight|bias)$\", name)\n        if m:\n            idx.setdefault(int(m.group(2)), {})[m.group(3)] = np.asarray(weights[name], dtype=np.float64)\n    return [(idx[k][\"weight\"], idx[k][\"bias\"]) for k in sorted(idx)]\n\n\ndef forward(layers, x, max_floats=8_000_000):\n    \"\"\"Forward pass in float32, chunked so that no activation exceeds ``max_floats`` values.\"\"\"\n    width = max(w.shape[0] for w, _ in layers)\n    chunk = max(1024, max_floats // width)\n    out = []\n    for i in range(0, len(x), chunk):\n        h = np.asarray(x[i : i + chunk], dtype=np.float32)\n        for j, (w, b) in enumerate(layers):\n            h = h @ w.T + b\n            if j < len(layers) - 1:\n                np.maximum(h, 0.0, out=h)\n        out.append(h[:, 0])\n    return np.concatenate(out).astype(np.float64) if out else np.zeros(0)\n\n\nclass Probe:\n    \"\"\"SDF probe in millimetres that counts how many points were evaluated.\"\"\"\n\n    def __init__(self, layers, mm_per_unit):\n        self.layers = [(np.asarray(w, np.float32), np.asarray(b, np.float32)) for w, b in layers]\n        self.s, self.n_eval = float(mm_per_unit), 0\n\n    def __call__(self, p_mm):\n        p = np.atleast_2d(np.asarray(p_mm, dtype=np.float64))\n        self.n_eval += len(p)\n        return forward(self.layers, p / self.s) * self.s\n\n\ndef bisect(f, p_in, p_out, iters=30):\n    \"\"\"Boundary point on the segment between an inside (f<0) and an outside (f>=0) point.\"\"\"\n    a, b = np.asarray(p_in, float), np.asarray(p_out, float)\n    for _ in range(iters):\n        mid = 0.5 * (a + b)\n        if f(mid)[0] < 0:\n            a = mid\n        else:\n            b = mid\n    return 0.5 * (a + b)\n\n\ndef march_to_boundary(f, origin, direction, t_max, step, want_inside):\n    \"\"\"First point along a ray where ``(f<0) == want_inside``; refined by bisection.\"\"\"\n    direction = np.asarray(direction, float) / np.linalg.norm(direction)\n    ts = np.arange(step, t_max + 1e-9, step)\n    pts = np.asarray(origin, float)[None, :] + ts[:, None] * direction[None, :]\n    inside = f(pts) < 0\n    hit = np.nonzero(inside == want_inside)[0]\n    if len(hit) == 0:\n        return None\n    k = int(hit[0])\n    prev = np.asarray(origin, float) if k == 0 else pts[k - 1]\n    p_in, p_out = (pts[k], prev) if want_inside else (prev, pts[k])\n    return bisect(f, p_in, p_out)\n\n\ndef fit_circle(pts):\n    \"\"\"Algebraic (Kåsa) least-squares circle fit → (cx, cy, r, rms_residual).\"\"\"\n    x, y = pts[:, 0], pts[:, 1]\n    a = np.stack([x, y, np.ones_like(x)], axis=1)\n    sol, *_ = np.linalg.lstsq(a, x**2 + y**2, rcond=None)\n    cx, cy = sol[0] / 2, sol[1] / 2\n    r = float(np.sqrt(max(sol[2] + cx**2 + cy**2, 0.0)))\n    res = np.hypot(x - cx, y - cy) - r\n    return float(cx), float(cy), r, float(np.sqrt(np.mean(res**2)))\n\n\ndef label_components(mask):\n    \"\"\"4-connected component labelling (iterative flood fill, numpy only).\"\"\"\n    labels = np.zeros(mask.shape, dtype=np.int64)\n    current = 0\n    for seed in zip(*np.nonzero(mask), strict=True):\n        if labels[seed]:\n            continue\n        current += 1\n        stack = [seed]\n        labels[seed] = current\n        while stack:\n            i, j = stack.pop()\n            for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)):\n                a, b = i + di, j + dj\n                if 0 <= a < mask.shape[0] and 0 <= b < mask.shape[1] and mask[a, b] and not labels[a, b]:\n                    labels[a, b] = current\n                    stack.append((a, b))\n    return labels, current\n\n\n# ------------------------------------------------------------------------------------------------\n# Part reading\n# ------------------------------------------------------------------------------------------------\n\n\ndef read_part(layers, mm_per_unit=50.0, coarse_mm=1.25, slice_mm=0.5, n_rays=48):\n    f = Probe(layers, mm_per_unit)\n    half = mm_per_unit  # workspace is [-1, 1]^3 in normalised units\n    axis = np.arange(-half, half + 1e-9, coarse_mm)\n    gx, gy, gz = np.meshgrid(axis, axis, axis, indexing=\"ij\")\n    occ = (f(np.stack([gx, gy, gz], -1).reshape(-1, 3)) < 0).reshape(gx.shape)\n    if not occ.any():\n        return {\"empty\": True, \"n_eval\": f.n_eval}\n\n    # --- vertical extent: bisection along typical full-thickness columns -----------------------------\n    # The modal column fill (not the max, which picks up local bulges of the fitted field) identifies\n    # ordinary full-thickness material; 15 columns spread over it give a robust median.\n    column_fill = occ.sum(axis=2)\n    fills, counts = np.unique(column_fill[column_fill > 0], return_counts=True)\n    full = np.argwhere(column_fill == fills[np.argmax(counts)])\n    picks = full[np.linspace(0, len(full) - 1, min(15, len(full))).astype(int)]\n    tops, bots = [], []\n    for i, j in picks:\n        ks = np.nonzero(occ[i, j])[0]\n        x0, y0, z_in = axis[i], axis[j], axis[ks[len(ks) // 2]]\n        tops.append(bisect(f, [x0, y0, z_in], [x0, y0, min(axis[ks[-1]] + coarse_mm, half)])[2])\n        bots.append(bisect(f, [x0, y0, z_in], [x0, y0, max(axis[ks[0]] - coarse_mm, -half)])[2])\n    z_top, z_bot = float(np.median(tops)), float(np.median(bots))\n    thickness = z_top - z_bot\n\n    # --- top-view slice just below the top face ---------------------------------------------------\n    z_probe = z_top - 0.2 * thickness\n    ii, jj = np.nonzero(occ.any(axis=2))\n    lo = np.array([axis[ii.min()] - 2 * coarse_mm, axis[jj.min()] - 2 * coarse_mm])\n    hi = np.array([axis[ii.max()] + 2 * coarse_mm, axis[jj.max()] + 2 * coarse_mm])\n    sx = np.arange(lo[0], hi[0] + 1e-9, slice_mm)\n    sy = np.arange(lo[1], hi[1] + 1e-9, slice_mm)\n    px, py = np.meshgrid(sx, sy, indexing=\"ij\")\n    sl = np.stack([px, py, np.full_like(px, z_probe)], -1).reshape(-1, 3)\n    solid = (f(sl) < 0).reshape(px.shape)\n\n    empty_labels, n_lab = label_components(~solid)\n    border = set(\n        np.unique(np.concatenate([empty_labels[0], empty_labels[-1], empty_labels[:, 0], empty_labels[:, -1]]))\n    )\n    filled = solid.copy()\n    hole_regions = []\n    for lab in range(1, n_lab + 1):\n        if lab in border:\n            continue\n        region = empty_labels == lab\n        filled |= region\n        if region.sum() * slice_mm**2 > 4.0:  # ignore specks < 4 mm^2\n            hole_regions.append(region)\n\n    # --- outline: rectangle vs disk from the fill ratio of the hole-free footprint ---------------\n    fi, fj = np.nonzero(filled)\n    ext_x = (sx[fi.min()], sx[fi.max()])\n    ext_y = (sy[fj.min()], sy[fj.max()])\n    cx0, cy0 = filled_centroid = (float(px[filled].mean()), float(py[filled].mean()))\n    z_mid = 0.5 * (z_top + z_bot)\n\n    # refine extents: march *inward* from outside along the X / Y lines through the footprint\n    # centroid, so that the first boundary met is the outer contour (not a hole wall)\n    def edge(start, direction, length):\n        p = march_to_boundary(f, start, direction, length, 0.25, True)\n        return start if p is None else p\n\n    span_x, span_y = ext_x[1] - ext_x[0] + 4 * slice_mm, ext_y[1] - ext_y[0] + 4 * slice_mm\n    xmax = edge([ext_x[1] + 2 * slice_mm, cy0, z_mid], [-1.0, 0, 0], span_x)[0]\n    xmin = edge([ext_x[0] - 2 * slice_mm, cy0, z_mid], [1.0, 0, 0], span_x)[0]\n    ymax = edge([cx0, ext_y[1] + 2 * slice_mm, z_mid], [0, -1.0, 0], span_y)[1]\n    ymin = edge([cx0, ext_y[0] - 2 * slice_mm, z_mid], [0, 1.0, 0], span_y)[1]\n    bbox_area = (ext_x[1] - ext_x[0] + slice_mm) * (ext_y[1] - ext_y[0] + slice_mm)\n    fill_ratio = float(filled.sum() * slice_mm**2 / bbox_area)\n    outline = \"rect\" if fill_ratio > 0.9 else \"disk\"\n\n    # --- holes ----------------------------------------------------------------------------------\n    holes = []\n    z_low = z_bot + 0.2 * thickness\n    for region in sorted(hole_regions, key=lambda r: -r.sum()):\n        hx, hy = float(px[region].mean()), float(py[region].mean())\n        r_eq = float(np.sqrt(region.sum() * slice_mm**2 / np.pi))\n        reach = 3.0 * r_eq + 5.0\n\n        def ring(z, hx=hx, hy=hy, reach=reach):\n            pts = []\n            for th in np.linspace(0, 2 * np.pi, n_rays, endpoint=False):\n                p = march_to_boundary(f, [hx, hy, z], [np.cos(th), np.sin(th), 0.0], reach, 0.25, True)\n                if p is not None:\n                    pts.append(p[:2])\n            return fit_circle(np.array(pts)) if len(pts) >= 8 else None\n\n        top = ring(z_probe)\n        if top is None:\n            continue\n        cx, cy, r_top, rms = top\n        # through vs blind: march down the axis from the probe slice, looking for material\n        floor = march_to_boundary(f, [cx, cy, z_probe], [0, 0, -1.0], z_probe - z_bot + 1.0, 0.25, True)\n        through = floor is None or floor[2] <= z_bot + 0.05 * thickness\n        hole = {\n            \"cx\": cx,\n            \"cy\": cy,\n            \"radius\": r_top,\n            \"through\": bool(through),\n            \"depth\": None,\n            \"cb_radius\": None,\n            \"cb_depth\": None,\n            \"circle_rms_mm\": rms,\n        }\n        # Radii are re-measured in the middle of each cylindrical segment: near the faces the\n        # fitted network rounds the edges, which biases ring measurements.\n        if not through:\n            z_floor = float(floor[2])\n            hole[\"depth\"] = float(z_top - z_floor)\n            mid = ring(0.5 * (z_top + z_floor))\n            if mid is not None:\n                hole.update(cx=mid[0], cy=mid[1], radius=mid[2], circle_rms_mm=mid[3])\n        else:\n            low = ring(z_low)\n            if low is not None and r_top > 1.2 * low[2]:\n                # counterbore: the probe slice cuts the counterbore; the low slice the hole itself\n                r_mid = 0.5 * (r_top + low[2])\n                cb_floor = march_to_boundary(f, [low[0] + r_mid, low[1], z_probe], [0, 0, -1.0], thickness, 0.25, True)\n                z_cb = float(cb_floor[2]) if cb_floor is not None else z_mid\n                inner = ring(0.5 * (z_bot + z_cb)) or low\n                outer = ring(0.5 * (z_top + z_cb)) or top\n                hole.update(\n                    cx=inner[0],\n                    cy=inner[1],\n                    radius=inner[2],\n                    circle_rms_mm=inner[3],\n                    cb_radius=outer[2],\n                    cb_depth=None if cb_floor is None else float(z_top - z_cb),\n                )\n            else:\n                mid = ring(z_mid)\n                if mid is not None:\n                    hole.update(cx=mid[0], cy=mid[1], radius=mid[2], circle_rms_mm=mid[3])\n        holes.append(hole)\n\n    if outline == \"disk\":\n        family = \"flange\"\n    elif not holes:\n        family = \"plate\"\n    elif holes[0][\"cb_radius\"] is not None:\n        family = \"counterbore\"\n    elif not holes[0][\"through\"]:\n        family = \"blind_hole\"\n    else:\n        family = \"through_hole\"\n\n    return {\n        \"family\": family,\n        \"outline\": outline,\n        \"size_x\": float(xmax - xmin),\n        \"size_y\": float(ymax - ymin),\n        \"center_x\": float(0.5 * (xmax + xmin)),\n        \"center_y\": float(0.5 * (ymax + ymin)),\n        \"thickness\": float(thickness),\n        \"z_bottom\": float(z_bot),\n        \"z_top\": float(z_top),\n        \"holes\": holes,\n        \"footprint_fill_ratio\": fill_ratio,\n        \"footprint_centroid\": [round(v, 3) for v in filled_centroid],\n        \"n_eval\": f.n_eval,\n    }\n\n\ndef architecture(layers):\n    return {\n        \"n_layers\": len(layers),\n        \"shapes\": [list(w.shape) for w, _ in layers],\n        \"n_params\": int(sum(w.size + b.size for w, b in layers)),\n        \"first_layer_axis_norms\": np.linalg.norm(layers[0][0], axis=0).round(3).tolist(),\n    }\n\n\nif __name__ == \"__sandbox__\":  # executed inside the sandbox: `weights` and `meta` are injected\n    _layers = layers_from_weights(weights)\n    RESULT = {\"architecture\": architecture(_layers), **read_part(_layers, meta.get(\"mm_per_unit\", 50.0))}\n"
+          },
+          "ok": true,
+          "output": "{\"ok\": true, \"stdout\": \"\", \"error\": null, \"result\": {\"architecture\": {\"n_layers\": 4, \"shapes\": [[64, 3], [64, 64], [64, 64], [1, 64]], \"n_params\": 8641, \"first_layer_axis_norms\": [2.591, 2.715, 3.378]}, \"family\": \"counterbore\", \"outline\": \"rect\", \"size_x\": 71.49703800701536, \"size_y\": 57.978636026382446, \"center_x\": 0.0030517578125, \"center_y\": 0.01453608286101371, \"thickness\": 13.550291396677494, \"z_bottom\": -7.53025897196494, \"z_top\": 6.020032424712554, \"holes\": [{\"cx\": -4.942492544067648, \"cy",
+          "seconds": 3.958
+        },
+        {
+          "tool": "submit_reading",
+          "input": {
+            "family": "counterbore",
+            "outline": "rect",
+            "size_x": 71.49703800701536,
+            "size_y": 57.978636026382446,
+            "thickness": 13.550291396677494,
+            "z_bottom": -7.53025897196494,
+            "holes": [
+              {
+                "cx": -4.942492544067648,
+                "cy": -1.6434349240321666,
+                "radius": 6.773210261437791,
+                "through": true,
+                "depth": null,
+                "cb_radius": 11.575377041868062,
+                "cb_depth": 6.2618409366114065
+              }
+            ],
+            "rationale": "architecture [[64, 3], [64, 64], [64, 64], [1, 64]] (8641 params) decoded from 8 tensors; first-layer column norms (x, y, z) = {'min': 2.590656, 'mean': 2.894614, 'max': 3.377752}\ntop-view footprint fill ratio 1.000 → outline 'rect' (rectangle ≈ 1.0, disk ≈ π/4 ≈ 0.785)\nthickness 13.55 mm: median of Z bisections along typical full-thickness columns\nhole 0: empty region enclosed by material below the top face; circle fit to bisected boundary points → centre (-4.94, -1.64), R6.77 mm (rms 0.203); through, counterbore R11.58 depth 6.26 mm (radius step along Z)\n588774 field evaluations of the decoded program (numpy, in the sandbox)"
+          },
+          "ok": true,
+          "output": "{\"status\": \"accepted\"}",
+          "seconds": 0.0
+        }
+      ]
+    }
+  },
+  {
+    "part": "counterbore_1",
+    "spec": {
+      "name": "counterbore_1",
+      "outline": "rect",
+      "size_x": 75.5,
+      "size_y": 56.0,
+      "thickness": 8.5,
+      "z_bottom": -2.5,
+      "center_x": 0.0,
+      "center_y": 0.0,
+      "holes": [
+        {
+          "cx": -13.5,
+          "cy": -2.0,
+          "radius": 5.5,
+          "depth": null,
+          "cb_radius": 9.5,
+          "cb_depth": 4.0
+        }
+      ],
+      "family": "counterbore"
+    },
+    "fit_seconds": 15.021878783999455,
+    "score": {
+      "answered": true,
+      "family_gt": "counterbore",
+      "family_pred": "counterbore",
+      "family_correct": true,
+      "size_x_err": 0.015193700790405273,
+      "size_y_err": 0.01760697364807129,
+      "thickness_err": 0.04799383785575628,
+      "z_bottom_err": 0.029907503630965948,
+      "hole_count_correct": true,
+      "center_err": 0.46322571665476847,
+      "radius_err": 0.9587093237580371,
+      "through_correct": true,
+      "cb_radius_err": 0.028860734206494598,
+      "cb_depth_err": 0.030436554574407637
+    },
+    "seconds": 4.054348742000002,
+    "n_tool_calls": 4,
+    "agent_result": {
+      "agent": "scripted",
+      "finished": true,
+      "n_tool_calls": 4,
+      "usage": {},
+      "stop_reason": "finished",
+      "notes": [],
+      "final_answer": {
+        "family": "counterbore",
+        "outline": "rect",
+        "size_x": 75.4848062992096,
+        "size_y": 55.98239302635193,
+        "thickness": 8.547993837855756,
+        "z_bottom": -2.529907503630966,
+        "holes": [
+          {
+            "cx": -13.113938437310624,
+            "cy": -2.2559971374530603,
+            "radius": 4.541290676241963,
+            "through": true,
+            "depth": null,
+            "cb_radius": 9.528860734206495,
+            "cb_depth": 4.030436554574408
+          }
+        ],
+        "rationale": "architecture [[64, 3], [64, 64], [64, 64], [1, 64]] (8641 params) decoded from 8 tensors; first-layer column norms (x, y, z) = {'min': 2.479802, 'mean': 2.839625, 'max': 3.40588}\ntop-view footprint fill ratio 0.993 → outline 'rect' (rectangle ≈ 1.0, disk ≈ π/4 ≈ 0.785)\nthickness 8.55 mm: median of Z bisections along typical full-thickness columns\nhole 0: empty region enclosed by material below the top face; circle fit to bisected boundary points → centre (-13.11, -2.26), R4.54 mm (rms 0.183); through, counterbore R9.53 depth 4.03 mm (radius step along Z)\n584605 field evaluations of the decoded program (numpy, in the sandbox)"
+      },
+      "transcript": [
+        {
+          "tool": "list_parameters",
+          "input": {},
+          "ok": true,
+          "output": "[{\"name\": \"net.0.weight\", \"shape\": [64, 3], \"numel\": 192, \"dtype\": \"float32\"}, {\"name\": \"net.0.bias\", \"shape\": [64], \"numel\": 64, \"dtype\": \"float32\"}, {\"name\": \"net.2.weight\", \"shape\": [64, 64], \"numel\": 4096, \"dtype\": \"float32\"}, {\"name\": \"net.2.bias\", \"shape\": [64], \"numel\": 64, \"dtype\": \"float32\"}, {\"name\": \"net.4.weight\", \"shape\": [64, 64], \"numel\": 4096, \"dtype\": \"float32\"}, {\"name\": \"net.4.bias\", \"shape\": [64], \"numel\": 64, \"dtype\": \"float32\"}, {\"name\": \"net.6.weight\", \"shape\": [1, 64], \"n",
+          "seconds": 0.0
+        },
+        {
+          "tool": "tensor_stats",
+          "input": {
+            "name": "net.0.weight"
+          },
+          "ok": true,
+          "output": "{\"name\": \"net.0.weight\", \"shape\": [64, 3], \"mean\": -0.019213, \"std\": 0.358971, \"min\": -0.757878, \"max\": 0.711736, \"l2\": 4.968213, \"abs_mean\": 0.298192, \"frac_near_zero\": 0.020833, \"row_norms\": {\"min\": 0.079126, \"mean\": 0.59686, \"max\": 0.921595}, \"col_norms\": {\"min\": 2.479802, \"mean\": 2.839625, \"max\": 3.40588}, \"argmax_col_norm\": 2}",
+          "seconds": 0.001
+        },
+        {
+          "tool": "run_python",
+          "input": {
+            "code": "\"\"\"Read a 3D machine part out of the raw weights of a ReLU SDF network (numpy only).\n\nThis file is what an agent *submits to the sandbox* (``run_python``): it receives the raw\n``weights`` dict (``name -> ndarray``) and the ``meta`` model card, re-implements the forward\npass from the weight matrices alone, and returns a structured description of the part in\n``RESULT``. It can also be imported in-process (``read_part``) for verification loops.\n\nStrategy (the \"program comprehension\" of an SDF network):\n1. Decode the architecture from tensor names/shapes → list of (W, b).\n2. Evaluate the decoded program on a coarse grid → occupancy (sdf < 0).\n3. Refine planar extents (thickness, outline) with bisection along axis-aligned rays.\n4. Find holes in a slice just below the top face (empty regions not connected to the outside),\n   fit circles to bisection-refined boundary points, then classify each hole by probing its\n   axis (through vs. blind) and its radius profile along Z (counterbore).\n\"\"\"\n\nimport re\n\nimport numpy as np\n\n# ------------------------------------------------------------------------------------------------\n# Architecture decoding and the forward pass\n# ------------------------------------------------------------------------------------------------\n\n\ndef layers_from_weights(weights):\n    \"\"\"Group ``<prefix>.<idx>.weight`` / ``.bias`` tensors into an ordered list of (W, b).\"\"\"\n    idx = {}\n    for name in weights:\n        m = re.match(r\"^(.*?)(\\d+)\\.(weight|bias)$\", name)\n        if m:\n            idx.setdefault(int(m.group(2)), {})[m.group(3)] = np.asarray(weights[name], dtype=np.float64)\n    return [(idx[k][\"weight\"], idx[k][\"bias\"]) for k in sorted(idx)]\n\n\ndef forward(layers, x, max_floats=8_000_000):\n    \"\"\"Forward pass in float32, chunked so that no activation exceeds ``max_floats`` values.\"\"\"\n    width = max(w.shape[0] for w, _ in layers)\n    chunk = max(1024, max_floats // width)\n    out = []\n    for i in range(0, len(x), chunk):\n        h = np.asarray(x[i : i + chunk], dtype=np.float32)\n        for j, (w, b) in enumerate(layers):\n            h = h @ w.T + b\n            if j < len(layers) - 1:\n                np.maximum(h, 0.0, out=h)\n        out.append(h[:, 0])\n    return np.concatenate(out).astype(np.float64) if out else np.zeros(0)\n\n\nclass Probe:\n    \"\"\"SDF probe in millimetres that counts how many points were evaluated.\"\"\"\n\n    def __init__(self, layers, mm_per_unit):\n        self.layers = [(np.asarray(w, np.float32), np.asarray(b, np.float32)) for w, b in layers]\n        self.s, self.n_eval = float(mm_per_unit), 0\n\n    def __call__(self, p_mm):\n        p = np.atleast_2d(np.asarray(p_mm, dtype=np.float64))\n        self.n_eval += len(p)\n        return forward(self.layers, p / self.s) * self.s\n\n\ndef bisect(f, p_in, p_out, iters=30):\n    \"\"\"Boundary point on the segment between an inside (f<0) and an outside (f>=0) point.\"\"\"\n    a, b = np.asarray(p_in, float), np.asarray(p_out, float)\n    for _ in range(iters):\n        mid = 0.5 * (a + b)\n        if f(mid)[0] < 0:\n            a = mid\n        else:\n            b = mid\n    return 0.5 * (a + b)\n\n\ndef march_to_boundary(f, origin, direction, t_max, step, want_inside):\n    \"\"\"First point along a ray where ``(f<0) == want_inside``; refined by bisection.\"\"\"\n    direction = np.asarray(direction, float) / np.linalg.norm(direction)\n    ts = np.arange(step, t_max + 1e-9, step)\n    pts = np.asarray(origin, float)[None, :] + ts[:, None] * direction[None, :]\n    inside = f(pts) < 0\n    hit = np.nonzero(inside == want_inside)[0]\n    if len(hit) == 0:\n        return None\n    k = int(hit[0])\n    prev = np.asarray(origin, float) if k == 0 else pts[k - 1]\n    p_in, p_out = (pts[k], prev) if want_inside else (prev, pts[k])\n    return bisect(f, p_in, p_out)\n\n\ndef fit_circle(pts):\n    \"\"\"Algebraic (Kåsa) least-squares circle fit → (cx, cy, r, rms_residual).\"\"\"\n    x, y = pts[:, 0], pts[:, 1]\n    a = np.stack([x, y, np.ones_like(x)], axis=1)\n    sol, *_ = np.linalg.lstsq(a, x**2 + y**2, rcond=None)\n    cx, cy = sol[0] / 2, sol[1] / 2\n    r = float(np.sqrt(max(sol[2] + cx**2 + cy**2, 0.0)))\n    res = np.hypot(x - cx, y - cy) - r\n    return float(cx), float(cy), r, float(np.sqrt(np.mean(res**2)))\n\n\ndef label_components(mask):\n    \"\"\"4-connected component labelling (iterative flood fill, numpy only).\"\"\"\n    labels = np.zeros(mask.shape, dtype=np.int64)\n    current = 0\n    for seed in zip(*np.nonzero(mask), strict=True):\n        if labels[seed]:\n            continue\n        current += 1\n        stack = [seed]\n        labels[seed] = current\n        while stack:\n            i, j = stack.pop()\n            for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)):\n                a, b = i + di, j + dj\n                if 0 <= a < mask.shape[0] and 0 <= b < mask.shape[1] and mask[a, b] and not labels[a, b]:\n                    labels[a, b] = current\n                    stack.append((a, b))\n    return labels, current\n\n\n# ------------------------------------------------------------------------------------------------\n# Part reading\n# ------------------------------------------------------------------------------------------------\n\n\ndef read_part(layers, mm_per_unit=50.0, coarse_mm=1.25, slice_mm=0.5, n_rays=48):\n    f = Probe(layers, mm_per_unit)\n    half = mm_per_unit  # workspace is [-1, 1]^3 in normalised units\n    axis = np.arange(-half, half + 1e-9, coarse_mm)\n    gx, gy, gz = np.meshgrid(axis, axis, axis, indexing=\"ij\")\n    occ = (f(np.stack([gx, gy, gz], -1).reshape(-1, 3)) < 0).reshape(gx.shape)\n    if not occ.any():\n        return {\"empty\": True, \"n_eval\": f.n_eval}\n\n    # --- vertical extent: bisection along typical full-thickness columns -----------------------------\n    # The modal column fill (not the max, which picks up local bulges of the fitted field) identifies\n    # ordinary full-thickness material; 15 columns spread over it give a robust median.\n    column_fill = occ.sum(axis=2)\n    fills, counts = np.unique(column_fill[column_fill > 0], return_counts=True)\n    full = np.argwhere(column_fill == fills[np.argmax(counts)])\n    picks = full[np.linspace(0, len(full) - 1, min(15, len(full))).astype(int)]\n    tops, bots = [], []\n    for i, j in picks:\n        ks = np.nonzero(occ[i, j])[0]\n        x0, y0, z_in = axis[i], axis[j], axis[ks[len(ks) // 2]]\n        tops.append(bisect(f, [x0, y0, z_in], [x0, y0, min(axis[ks[-1]] + coarse_mm, half)])[2])\n        bots.append(bisect(f, [x0, y0, z_in], [x0, y0, max(axis[ks[0]] - coarse_mm, -half)])[2])\n    z_top, z_bot = float(np.median(tops)), float(np.median(bots))\n    thickness = z_top - z_bot\n\n    # --- top-view slice just below the top face ---------------------------------------------------\n    z_probe = z_top - 0.2 * thickness\n    ii, jj = np.nonzero(occ.any(axis=2))\n    lo = np.array([axis[ii.min()] - 2 * coarse_mm, axis[jj.min()] - 2 * coarse_mm])\n    hi = np.array([axis[ii.max()] + 2 * coarse_mm, axis[jj.max()] + 2 * coarse_mm])\n    sx = np.arange(lo[0], hi[0] + 1e-9, slice_mm)\n    sy = np.arange(lo[1], hi[1] + 1e-9, slice_mm)\n    px, py = np.meshgrid(sx, sy, indexing=\"ij\")\n    sl = np.stack([px, py, np.full_like(px, z_probe)], -1).reshape(-1, 3)\n    solid = (f(sl) < 0).reshape(px.shape)\n\n    empty_labels, n_lab = label_components(~solid)\n    border = set(\n        np.unique(np.concatenate([empty_labels[0], empty_labels[-1], empty_labels[:, 0], empty_labels[:, -1]]))\n    )\n    filled = solid.copy()\n    hole_regions = []\n    for lab in range(1, n_lab + 1):\n        if lab in border:\n            continue\n        region = empty_labels == lab\n        filled |= region\n        if region.sum() * slice_mm**2 > 4.0:  # ignore specks < 4 mm^2\n            hole_regions.append(region)\n\n    # --- outline: rectangle vs disk from the fill ratio of the hole-free footprint ---------------\n    fi, fj = np.nonzero(filled)\n    ext_x = (sx[fi.min()], sx[fi.max()])\n    ext_y = (sy[fj.min()], sy[fj.max()])\n    cx0, cy0 = filled_centroid = (float(px[filled].mean()), float(py[filled].mean()))\n    z_mid = 0.5 * (z_top + z_bot)\n\n    # refine extents: march *inward* from outside along the X / Y lines through the footprint\n    # centroid, so that the first boundary met is the outer contour (not a hole wall)\n    def edge(start, direction, length):\n        p = march_to_boundary(f, start, direction, length, 0.25, True)\n        return start if p is None else p\n\n    span_x, span_y = ext_x[1] - ext_x[0] + 4 * slice_mm, ext_y[1] - ext_y[0] + 4 * slice_mm\n    xmax = edge([ext_x[1] + 2 * slice_mm, cy0, z_mid], [-1.0, 0, 0], span_x)[0]\n    xmin = edge([ext_x[0] - 2 * slice_mm, cy0, z_mid], [1.0, 0, 0], span_x)[0]\n    ymax = edge([cx0, ext_y[1] + 2 * slice_mm, z_mid], [0, -1.0, 0], span_y)[1]\n    ymin = edge([cx0, ext_y[0] - 2 * slice_mm, z_mid], [0, 1.0, 0], span_y)[1]\n    bbox_area = (ext_x[1] - ext_x[0] + slice_mm) * (ext_y[1] - ext_y[0] + slice_mm)\n    fill_ratio = float(filled.sum() * slice_mm**2 / bbox_area)\n    outline = \"rect\" if fill_ratio > 0.9 else \"disk\"\n\n    # --- holes ----------------------------------------------------------------------------------\n    holes = []\n    z_low = z_bot + 0.2 * thickness\n    for region in sorted(hole_regions, key=lambda r: -r.sum()):\n        hx, hy = float(px[region].mean()), float(py[region].mean())\n        r_eq = float(np.sqrt(region.sum() * slice_mm**2 / np.pi))\n        reach = 3.0 * r_eq + 5.0\n\n        def ring(z, hx=hx, hy=hy, reach=reach):\n            pts = []\n            for th in np.linspace(0, 2 * np.pi, n_rays, endpoint=False):\n                p = march_to_boundary(f, [hx, hy, z], [np.cos(th), np.sin(th), 0.0], reach, 0.25, True)\n                if p is not None:\n                    pts.append(p[:2])\n            return fit_circle(np.array(pts)) if len(pts) >= 8 else None\n\n        top = ring(z_probe)\n        if top is None:\n            continue\n        cx, cy, r_top, rms = top\n        # through vs blind: march down the axis from the probe slice, looking for material\n        floor = march_to_boundary(f, [cx, cy, z_probe], [0, 0, -1.0], z_probe - z_bot + 1.0, 0.25, True)\n        through = floor is None or floor[2] <= z_bot + 0.05 * thickness\n        hole = {\n            \"cx\": cx,\n            \"cy\": cy,\n            \"radius\": r_top,\n            \"through\": bool(through),\n            \"depth\": None,\n            \"cb_radius\": None,\n            \"cb_depth\": None,\n            \"circle_rms_mm\": rms,\n        }\n        # Radii are re-measured in the middle of each cylindrical segment: near the faces the\n        # fitted network rounds the edges, which biases ring measurements.\n        if not through:\n            z_floor = float(floor[2])\n            hole[\"depth\"] = float(z_top - z_floor)\n            mid = ring(0.5 * (z_top + z_floor))\n            if mid is not None:\n                hole.update(cx=mid[0], cy=mid[1], radius=mid[2], circle_rms_mm=mid[3])\n        else:\n            low = ring(z_low)\n            if low is not None and r_top > 1.2 * low[2]:\n                # counterbore: the probe slice cuts the counterbore; the low slice the hole itself\n                r_mid = 0.5 * (r_top + low[2])\n                cb_floor = march_to_boundary(f, [low[0] + r_mid, low[1], z_probe], [0, 0, -1.0], thickness, 0.25, True)\n                z_cb = float(cb_floor[2]) if cb_floor is not None else z_mid\n                inner = ring(0.5 * (z_bot + z_cb)) or low\n                outer = ring(0.5 * (z_top + z_cb)) or top\n                hole.update(\n                    cx=inner[0],\n                    cy=inner[1],\n                    radius=inner[2],\n                    circle_rms_mm=inner[3],\n                    cb_radius=outer[2],\n                    cb_depth=None if cb_floor is None else float(z_top - z_cb),\n                )\n            else:\n                mid = ring(z_mid)\n                if mid is not None:\n                    hole.update(cx=mid[0], cy=mid[1], radius=mid[2], circle_rms_mm=mid[3])\n        holes.append(hole)\n\n    if outline == \"disk\":\n        family = \"flange\"\n    elif not holes:\n        family = \"plate\"\n    elif holes[0][\"cb_radius\"] is not None:\n        family = \"counterbore\"\n    elif not holes[0][\"through\"]:\n        family = \"blind_hole\"\n    else:\n        family = \"through_hole\"\n\n    return {\n        \"family\": family,\n        \"outline\": outline,\n        \"size_x\": float(xmax - xmin),\n        \"size_y\": float(ymax - ymin),\n        \"center_x\": float(0.5 * (xmax + xmin)),\n        \"center_y\": float(0.5 * (ymax + ymin)),\n        \"thickness\": float(thickness),\n        \"z_bottom\": float(z_bot),\n        \"z_top\": float(z_top),\n        \"holes\": holes,\n        \"footprint_fill_ratio\": fill_ratio,\n        \"footprint_centroid\": [round(v, 3) for v in filled_centroid],\n        \"n_eval\": f.n_eval,\n    }\n\n\ndef architecture(layers):\n    return {\n        \"n_layers\": len(layers),\n        \"shapes\": [list(w.shape) for w, _ in layers],\n        \"n_params\": int(sum(w.size + b.size for w, b in layers)),\n        \"first_layer_axis_norms\": np.linalg.norm(layers[0][0], axis=0).round(3).tolist(),\n    }\n\n\nif __name__ == \"__sandbox__\":  # executed inside the sandbox: `weights` and `meta` are injected\n    _layers = layers_from_weights(weights)\n    RESULT = {\"architecture\": architecture(_layers), **read_part(_layers, meta.get(\"mm_per_unit\", 50.0))}\n"
+          },
+          "ok": true,
+          "output": "{\"ok\": true, \"stdout\": \"\", \"error\": null, \"result\": {\"architecture\": {\"n_layers\": 4, \"shapes\": [[64, 3], [64, 64], [64, 64], [1, 64]], \"n_params\": 8641, \"first_layer_axis_norms\": [2.48, 2.633, 3.406]}, \"family\": \"counterbore\", \"outline\": \"rect\", \"size_x\": 75.4848062992096, \"size_y\": 55.98239302635193, \"center_x\": -0.0029966236324980855, \"center_y\": 0.009904801961965859, \"thickness\": 8.547993837855756, \"z_bottom\": -2.529907503630966, \"z_top\": 6.01808633422479, \"holes\": [{\"cx\": -13.113938437310624",
+          "seconds": 4.053
+        },
+        {
+          "tool": "submit_reading",
+          "input": {
+            "family": "counterbore",
+            "outline": "rect",
+            "size_x": 75.4848062992096,
+            "size_y": 55.98239302635193,
+            "thickness": 8.547993837855756,
+            "z_bottom": -2.529907503630966,
+            "holes": [
+              {
+                "cx": -13.113938437310624,
+                "cy": -2.2559971374530603,
+                "radius": 4.541290676241963,
+                "through": true,
+                "depth": null,
+                "cb_radius": 9.528860734206495,
+                "cb_depth": 4.030436554574408
+              }
+            ],
+            "rationale": "architecture [[64, 3], [64, 64], [64, 64], [1, 64]] (8641 params) decoded from 8 tensors; first-layer column norms (x, y, z) = {'min': 2.479802, 'mean': 2.839625, 'max': 3.40588}\ntop-view footprint fill ratio 0.993 → outline 'rect' (rectangle ≈ 1.0, disk ≈ π/4 ≈ 0.785)\nthickness 8.55 mm: median of Z bisections along typical full-thickness columns\nhole 0: empty region enclosed by material below the top face; circle fit to bisected boundary points → centre (-13.11, -2.26), R4.54 mm (rms 0.183); through, counterbore R9.53 depth 4.03 mm (radius step along Z)\n584605 field evaluations of the decoded program (numpy, in the sandbox)"
+          },
+          "ok": true,
+          "output": "{\"status\": \"accepted\"}",
+          "seconds": 0.0
+        }
+      ]
+    }
+  },
+  {
+    "part": "flange_0",
+    "spec": {
+      "name": "flange_0",
+      "outline": "disk",
+      "size_x": 68.0,
+      "size_y": 68.0,
+      "thickness": 9.5,
+      "z_bottom": -7.5,
+      "center_x": 0.0,
+      "center_y": 0.0,
+      "holes": [
+        {
+          "cx": 0.0,
+          "cy": 0.0,
+          "radius": 8.0,
+          "depth": null,
+          "cb_radius": null,
+          "cb_depth": null
+        }
+      ],
+      "family": "flange"
+    },
+    "fit_seconds": 14.871586719000334,
+    "score": {
+      "answered": true,
+      "family_gt": "flange",
+      "family_pred": "flange",
+      "family_correct": true,
+      "size_x_err": 0.03759193420410156,
+      "size_y_err": 0.011207937961444259,
+      "thickness_err": 0.03995911229867488,
+      "z_bottom_err": 0.04041634558234364,
+      "hole_count_correct": true,
+      "center_err": 0.054207159455323936,
+      "radius_err": 0.11593099761596015,
+      "through_correct": true
+    },
+    "seconds": 4.071386207000614,
+    "n_tool_calls": 4,
+    "agent_result": {
+      "agent": "scripted",
+      "finished": true,
+      "n_tool_calls": 4,
+      "usage": {},
+      "stop_reason": "finished",
+      "notes": [],
+      "final_answer": {
+        "family": "flange",
+        "outline": "disk",
+        "size_x": 67.9624080657959,
+        "size_y": 67.98879206203856,
+        "thickness": 9.539959112298675,
+        "z_bottom": -7.540416345582344,
+        "holes": [
+          {
+            "cx": 0.04884067543401333,
+            "cy": -0.0235160489743554,
+            "radius": 7.88406900238404,
+            "through": true,
+            "depth": null,
+            "cb_radius": null,
+            "cb_depth": null
+          }
+        ],
+        "rationale": "architecture [[64, 3], [64, 64], [64, 64], [1, 64]] (8641 params) decoded from 8 tensors; first-layer column norms (x, y, z) = {'min': 2.68511, 'mean': 2.95307, 'max': 3.391321}\ntop-view footprint fill ratio 0.786 → outline 'disk' (rectangle ≈ 1.0, disk ≈ π/4 ≈ 0.785)\nthickness 9.54 mm: median of Z bisections along typical full-thickness columns\nhole 0: empty region enclosed by material below the top face; circle fit to bisected boundary points → centre (0.05, -0.02), R7.88 mm (rms 0.209); through\n575947 field evaluations of the decoded program (numpy, in the sandbox)"
+      },
+      "transcript": [
+        {
+          "tool": "list_parameters",
+          "input": {},
+          "ok": true,
+          "output": "[{\"name\": \"net.0.weight\", \"shape\": [64, 3], \"numel\": 192, \"dtype\": \"float32\"}, {\"name\": \"net.0.bias\", \"shape\": [64], \"numel\": 64, \"dtype\": \"float32\"}, {\"name\": \"net.2.weight\", \"shape\": [64, 64], \"numel\": 4096, \"dtype\": \"float32\"}, {\"name\": \"net.2.bias\", \"shape\": [64], \"numel\": 64, \"dtype\": \"float32\"}, {\"name\": \"net.4.weight\", \"shape\": [64, 64], \"numel\": 4096, \"dtype\": \"float32\"}, {\"name\": \"net.4.bias\", \"shape\": [64], \"numel\": 64, \"dtype\": \"float32\"}, {\"name\": \"net.6.weight\", \"shape\": [1, 64], \"n",
+          "seconds": 0.0
+        },
+        {
+          "tool": "tensor_stats",
+          "input": {
+            "name": "net.0.weight"
+          },
+          "ok": true,
+          "output": "{\"name\": \"net.0.weight\", \"shape\": [64, 3], \"mean\": -0.019898, \"std\": 0.37163, \"min\": -0.700201, \"max\": 0.799341, \"l2\": 5.143417, \"abs_mean\": 0.317486, \"frac_near_zero\": 0.005208, \"row_norms\": {\"min\": 0.079126, \"mean\": 0.620468, \"max\": 0.98774}, \"col_norms\": {\"min\": 2.68511, \"mean\": 2.95307, \"max\": 3.391321}, \"argmax_col_norm\": 2}",
+          "seconds": 0.001
+        },
+        {
+          "tool": "run_python",
+          "input": {
+            "code": "\"\"\"Read a 3D machine part out of the raw weights of a ReLU SDF network (numpy only).\n\nThis file is what an agent *submits to the sandbox* (``run_python``): it receives the raw\n``weights`` dict (``name -> ndarray``) and the ``meta`` model card, re-implements the forward\npass from the weight matrices alone, and returns a structured description of the part in\n``RESULT``. It can also be imported in-process (``read_part``) for verification loops.\n\nStrategy (the \"program comprehension\" of an SDF network):\n1. Decode the architecture from tensor names/shapes → list of (W, b).\n2. Evaluate the decoded program on a coarse grid → occupancy (sdf < 0).\n3. Refine planar extents (thickness, outline) with bisection along axis-aligned rays.\n4. Find holes in a slice just below the top face (empty regions not connected to the outside),\n   fit circles to bisection-refined boundary points, then classify each hole by probing its\n   axis (through vs. blind) and its radius profile along Z (counterbore).\n\"\"\"\n\nimport re\n\nimport numpy as np\n\n# ------------------------------------------------------------------------------------------------\n# Architecture decoding and the forward pass\n# ------------------------------------------------------------------------------------------------\n\n\ndef layers_from_weights(weights):\n    \"\"\"Group ``<prefix>.<idx>.weight`` / ``.bias`` tensors into an ordered list of (W, b).\"\"\"\n    idx = {}\n    for name in weights:\n        m = re.match(r\"^(.*?)(\\d+)\\.(weight|bias)$\", name)\n        if m:\n            idx.setdefault(int(m.group(2)), {})[m.group(3)] = np.asarray(weights[name], dtype=np.float64)\n    return [(idx[k][\"weight\"], idx[k][\"bias\"]) for k in sorted(idx)]\n\n\ndef forward(layers, x, max_floats=8_000_000):\n    \"\"\"Forward pass in float32, chunked so that no activation exceeds ``max_floats`` values.\"\"\"\n    width = max(w.shape[0] for w, _ in layers)\n    chunk = max(1024, max_floats // width)\n    out = []\n    for i in range(0, len(x), chunk):\n        h = np.asarray(x[i : i + chunk], dtype=np.float32)\n        for j, (w, b) in enumerate(layers):\n            h = h @ w.T + b\n            if j < len(layers) - 1:\n                np.maximum(h, 0.0, out=h)\n        out.append(h[:, 0])\n    return np.concatenate(out).astype(np.float64) if out else np.zeros(0)\n\n\nclass Probe:\n    \"\"\"SDF probe in millimetres that counts how many points were evaluated.\"\"\"\n\n    def __init__(self, layers, mm_per_unit):\n        self.layers = [(np.asarray(w, np.float32), np.asarray(b, np.float32)) for w, b in layers]\n        self.s, self.n_eval = float(mm_per_unit), 0\n\n    def __call__(self, p_mm):\n        p = np.atleast_2d(np.asarray(p_mm, dtype=np.float64))\n        self.n_eval += len(p)\n        return forward(self.layers, p / self.s) * self.s\n\n\ndef bisect(f, p_in, p_out, iters=30):\n    \"\"\"Boundary point on the segment between an inside (f<0) and an outside (f>=0) point.\"\"\"\n    a, b = np.asarray(p_in, float), np.asarray(p_out, float)\n    for _ in range(iters):\n        mid = 0.5 * (a + b)\n        if f(mid)[0] < 0:\n            a = mid\n        else:\n            b = mid\n    return 0.5 * (a + b)\n\n\ndef march_to_boundary(f, origin, direction, t_max, step, want_inside):\n    \"\"\"First point along a ray where ``(f<0) == want_inside``; refined by bisection.\"\"\"\n    direction = np.asarray(direction, float) / np.linalg.norm(direction)\n    ts = np.arange(step, t_max + 1e-9, step)\n    pts = np.asarray(origin, float)[None, :] + ts[:, None] * direction[None, :]\n    inside = f(pts) < 0\n    hit = np.nonzero(inside == want_inside)[0]\n    if len(hit) == 0:\n        return None\n    k = int(hit[0])\n    prev = np.asarray(origin, float) if k == 0 else pts[k - 1]\n    p_in, p_out = (pts[k], prev) if want_inside else (prev, pts[k])\n    return bisect(f, p_in, p_out)\n\n\ndef fit_circle(pts):\n    \"\"\"Algebraic (Kåsa) least-squares circle fit → (cx, cy, r, rms_residual).\"\"\"\n    x, y = pts[:, 0], pts[:, 1]\n    a = np.stack([x, y, np.ones_like(x)], axis=1)\n    sol, *_ = np.linalg.lstsq(a, x**2 + y**2, rcond=None)\n    cx, cy = sol[0] / 2, sol[1] / 2\n    r = float(np.sqrt(max(sol[2] + cx**2 + cy**2, 0.0)))\n    res = np.hypot(x - cx, y - cy) - r\n    return float(cx), float(cy), r, float(np.sqrt(np.mean(res**2)))\n\n\ndef label_components(mask):\n    \"\"\"4-connected component labelling (iterative flood fill, numpy only).\"\"\"\n    labels = np.zeros(mask.shape, dtype=np.int64)\n    current = 0\n    for seed in zip(*np.nonzero(mask), strict=True):\n        if labels[seed]:\n            continue\n        current += 1\n        stack = [seed]\n        labels[seed] = current\n        while stack:\n            i, j = stack.pop()\n            for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)):\n                a, b = i + di, j + dj\n                if 0 <= a < mask.shape[0] and 0 <= b < mask.shape[1] and mask[a, b] and not labels[a, b]:\n                    labels[a, b] = current\n                    stack.append((a, b))\n    return labels, current\n\n\n# ------------------------------------------------------------------------------------------------\n# Part reading\n# ------------------------------------------------------------------------------------------------\n\n\ndef read_part(layers, mm_per_unit=50.0, coarse_mm=1.25, slice_mm=0.5, n_rays=48):\n    f = Probe(layers, mm_per_unit)\n    half = mm_per_unit  # workspace is [-1, 1]^3 in normalised units\n    axis = np.arange(-half, half + 1e-9, coarse_mm)\n    gx, gy, gz = np.meshgrid(axis, axis, axis, indexing=\"ij\")\n    occ = (f(np.stack([gx, gy, gz], -1).reshape(-1, 3)) < 0).reshape(gx.shape)\n    if not occ.any():\n        return {\"empty\": True, \"n_eval\": f.n_eval}\n\n    # --- vertical extent: bisection along typical full-thickness columns -----------------------------\n    # The modal column fill (not the max, which picks up local bulges of the fitted field) identifies\n    # ordinary full-thickness material; 15 columns spread over it give a robust median.\n    column_fill = occ.sum(axis=2)\n    fills, counts = np.unique(column_fill[column_fill > 0], return_counts=True)\n    full = np.argwhere(column_fill == fills[np.argmax(counts)])\n    picks = full[np.linspace(0, len(full) - 1, min(15, len(full))).astype(int)]\n    tops, bots = [], []\n    for i, j in picks:\n        ks = np.nonzero(occ[i, j])[0]\n        x0, y0, z_in = axis[i], axis[j], axis[ks[len(ks) // 2]]\n        tops.append(bisect(f, [x0, y0, z_in], [x0, y0, min(axis[ks[-1]] + coarse_mm, half)])[2])\n        bots.append(bisect(f, [x0, y0, z_in], [x0, y0, max(axis[ks[0]] - coarse_mm, -half)])[2])\n    z_top, z_bot = float(np.median(tops)), float(np.median(bots))\n    thickness = z_top - z_bot\n\n    # --- top-view slice just below the top face ---------------------------------------------------\n    z_probe = z_top - 0.2 * thickness\n    ii, jj = np.nonzero(occ.any(axis=2))\n    lo = np.array([axis[ii.min()] - 2 * coarse_mm, axis[jj.min()] - 2 * coarse_mm])\n    hi = np.array([axis[ii.max()] + 2 * coarse_mm, axis[jj.max()] + 2 * coarse_mm])\n    sx = np.arange(lo[0], hi[0] + 1e-9, slice_mm)\n    sy = np.arange(lo[1], hi[1] + 1e-9, slice_mm)\n    px, py = np.meshgrid(sx, sy, indexing=\"ij\")\n    sl = np.stack([px, py, np.full_like(px, z_probe)], -1).reshape(-1, 3)\n    solid = (f(sl) < 0).reshape(px.shape)\n\n    empty_labels, n_lab = label_components(~solid)\n    border = set(\n        np.unique(np.concatenate([empty_labels[0], empty_labels[-1], empty_labels[:, 0], empty_labels[:, -1]]))\n    )\n    filled = solid.copy()\n    hole_regions = []\n    for lab in range(1, n_lab + 1):\n        if lab in border:\n            continue\n        region = empty_labels == lab\n        filled |= region\n        if region.sum() * slice_mm**2 > 4.0:  # ignore specks < 4 mm^2\n            hole_regions.append(region)\n\n    # --- outline: rectangle vs disk from the fill ratio of the hole-free footprint ---------------\n    fi, fj = np.nonzero(filled)\n    ext_x = (sx[fi.min()], sx[fi.max()])\n    ext_y = (sy[fj.min()], sy[fj.max()])\n    cx0, cy0 = filled_centroid = (float(px[filled].mean()), float(py[filled].mean()))\n    z_mid = 0.5 * (z_top + z_bot)\n\n    # refine extents: march *inward* from outside along the X / Y lines through the footprint\n    # centroid, so that the first boundary met is the outer contour (not a hole wall)\n    def edge(start, direction, length):\n        p = march_to_boundary(f, start, direction, length, 0.25, True)\n        return start if p is None else p\n\n    span_x, span_y = ext_x[1] - ext_x[0] + 4 * slice_mm, ext_y[1] - ext_y[0] + 4 * slice_mm\n    xmax = edge([ext_x[1] + 2 * slice_mm, cy0, z_mid], [-1.0, 0, 0], span_x)[0]\n    xmin = edge([ext_x[0] - 2 * slice_mm, cy0, z_mid], [1.0, 0, 0], span_x)[0]\n    ymax = edge([cx0, ext_y[1] + 2 * slice_mm, z_mid], [0, -1.0, 0], span_y)[1]\n    ymin = edge([cx0, ext_y[0] - 2 * slice_mm, z_mid], [0, 1.0, 0], span_y)[1]\n    bbox_area = (ext_x[1] - ext_x[0] + slice_mm) * (ext_y[1] - ext_y[0] + slice_mm)\n    fill_ratio = float(filled.sum() * slice_mm**2 / bbox_area)\n    outline = \"rect\" if fill_ratio > 0.9 else \"disk\"\n\n    # --- holes ----------------------------------------------------------------------------------\n    holes = []\n    z_low = z_bot + 0.2 * thickness\n    for region in sorted(hole_regions, key=lambda r: -r.sum()):\n        hx, hy = float(px[region].mean()), float(py[region].mean())\n        r_eq = float(np.sqrt(region.sum() * slice_mm**2 / np.pi))\n        reach = 3.0 * r_eq + 5.0\n\n        def ring(z, hx=hx, hy=hy, reach=reach):\n            pts = []\n            for th in np.linspace(0, 2 * np.pi, n_rays, endpoint=False):\n                p = march_to_boundary(f, [hx, hy, z], [np.cos(th), np.sin(th), 0.0], reach, 0.25, True)\n                if p is not None:\n                    pts.append(p[:2])\n            return fit_circle(np.array(pts)) if len(pts) >= 8 else None\n\n        top = ring(z_probe)\n        if top is None:\n            continue\n        cx, cy, r_top, rms = top\n        # through vs blind: march down the axis from the probe slice, looking for material\n        floor = march_to_boundary(f, [cx, cy, z_probe], [0, 0, -1.0], z_probe - z_bot + 1.0, 0.25, True)\n        through = floor is None or floor[2] <= z_bot + 0.05 * thickness\n        hole = {\n            \"cx\": cx,\n            \"cy\": cy,\n            \"radius\": r_top,\n            \"through\": bool(through),\n            \"depth\": None,\n            \"cb_radius\": None,\n            \"cb_depth\": None,\n            \"circle_rms_mm\": rms,\n        }\n        # Radii are re-measured in the middle of each cylindrical segment: near the faces the\n        # fitted network rounds the edges, which biases ring measurements.\n        if not through:\n            z_floor = float(floor[2])\n            hole[\"depth\"] = float(z_top - z_floor)\n            mid = ring(0.5 * (z_top + z_floor))\n            if mid is not None:\n                hole.update(cx=mid[0], cy=mid[1], radius=mid[2], circle_rms_mm=mid[3])\n        else:\n            low = ring(z_low)\n            if low is not None and r_top > 1.2 * low[2]:\n                # counterbore: the probe slice cuts the counterbore; the low slice the hole itself\n                r_mid = 0.5 * (r_top + low[2])\n                cb_floor = march_to_boundary(f, [low[0] + r_mid, low[1], z_probe], [0, 0, -1.0], thickness, 0.25, True)\n                z_cb = float(cb_floor[2]) if cb_floor is not None else z_mid\n                inner = ring(0.5 * (z_bot + z_cb)) or low\n                outer = ring(0.5 * (z_top + z_cb)) or top\n                hole.update(\n                    cx=inner[0],\n                    cy=inner[1],\n                    radius=inner[2],\n                    circle_rms_mm=inner[3],\n                    cb_radius=outer[2],\n                    cb_depth=None if cb_floor is None else float(z_top - z_cb),\n                )\n            else:\n                mid = ring(z_mid)\n                if mid is not None:\n                    hole.update(cx=mid[0], cy=mid[1], radius=mid[2], circle_rms_mm=mid[3])\n        holes.append(hole)\n\n    if outline == \"disk\":\n        family = \"flange\"\n    elif not holes:\n        family = \"plate\"\n    elif holes[0][\"cb_radius\"] is not None:\n        family = \"counterbore\"\n    elif not holes[0][\"through\"]:\n        family = \"blind_hole\"\n    else:\n        family = \"through_hole\"\n\n    return {\n        \"family\": family,\n        \"outline\": outline,\n        \"size_x\": float(xmax - xmin),\n        \"size_y\": float(ymax - ymin),\n        \"center_x\": float(0.5 * (xmax + xmin)),\n        \"center_y\": float(0.5 * (ymax + ymin)),\n        \"thickness\": float(thickness),\n        \"z_bottom\": float(z_bot),\n        \"z_top\": float(z_top),\n        \"holes\": holes,\n        \"footprint_fill_ratio\": fill_ratio,\n        \"footprint_centroid\": [round(v, 3) for v in filled_centroid],\n        \"n_eval\": f.n_eval,\n    }\n\n\ndef architecture(layers):\n    return {\n        \"n_layers\": len(layers),\n        \"shapes\": [list(w.shape) for w, _ in layers],\n        \"n_params\": int(sum(w.size + b.size for w, b in layers)),\n        \"first_layer_axis_norms\": np.linalg.norm(layers[0][0], axis=0).round(3).tolist(),\n    }\n\n\nif __name__ == \"__sandbox__\":  # executed inside the sandbox: `weights` and `meta` are injected\n    _layers = layers_from_weights(weights)\n    RESULT = {\"architecture\": architecture(_layers), **read_part(_layers, meta.get(\"mm_per_unit\", 50.0))}\n"
+          },
+          "ok": true,
+          "output": "{\"ok\": true, \"stdout\": \"\", \"error\": null, \"result\": {\"architecture\": {\"n_layers\": 4, \"shapes\": [[64, 3], [64, 64], [64, 64], [1, 64]], \"n_params\": 8641, \"first_layer_axis_norms\": [2.685, 2.783, 3.391]}, \"family\": \"flange\", \"outline\": \"disk\", \"size_x\": 67.9624080657959, \"size_y\": 67.98879206203856, \"center_x\": 0.019384920713491738, \"center_y\": 0.041544437408447266, \"thickness\": 9.539959112298675, \"z_bottom\": -7.540416345582344, \"z_top\": 1.9995427667163312, \"holes\": [{\"cx\": 0.04884067543401333, \"c",
+          "seconds": 4.069
+        },
+        {
+          "tool": "submit_reading",
+          "input": {
+            "family": "flange",
+            "outline": "disk",
+            "size_x": 67.9624080657959,
+            "size_y": 67.98879206203856,
+            "thickness": 9.539959112298675,
+            "z_bottom": -7.540416345582344,
+            "holes": [
+              {
+                "cx": 0.04884067543401333,
+                "cy": -0.0235160489743554,
+                "radius": 7.88406900238404,
+                "through": true,
+                "depth": null,
+                "cb_radius": null,
+                "cb_depth": null
+              }
+            ],
+            "rationale": "architecture [[64, 3], [64, 64], [64, 64], [1, 64]] (8641 params) decoded from 8 tensors; first-layer column norms (x, y, z) = {'min': 2.68511, 'mean': 2.95307, 'max': 3.391321}\ntop-view footprint fill ratio 0.786 → outline 'disk' (rectangle ≈ 1.0, disk ≈ π/4 ≈ 0.785)\nthickness 9.54 mm: median of Z bisections along typical full-thickness columns\nhole 0: empty region enclosed by material below the top face; circle fit to bisected boundary points → centre (0.05, -0.02), R7.88 mm (rms 0.209); through\n575947 field evaluations of the decoded program (numpy, in the sandbox)"
+          },
+          "ok": true,
+          "output": "{\"status\": \"accepted\"}",
+          "seconds": 0.0
+        }
+      ]
+    }
+  },
+  {
+    "part": "flange_1",
+    "spec": {
+      "name": "flange_1",
+      "outline": "disk",
+      "size_x": 66.0,
+      "size_y": 66.0,
+      "thickness": 8.5,
+      "z_bottom": -4.0,
+      "center_x": 0.0,
+      "center_y": 0.0,
+      "holes": [
+        {
+          "cx": 0.0,
+          "cy": 0.0,
+          "radius": 10.5,
+          "depth": null,
+          "cb_radius": null,
+          "cb_depth": null
+        }
+      ],
+      "family": "flange"
+    },
+    "fit_seconds": 15.371975046999978,
+    "score": {
+      "answered": true,
+      "family_gt": "flange",
+      "family_pred": "flange",
+      "family_correct": true,
+      "size_x_err": 0.023713350296020508,
+      "size_y_err": 0.04025733447633684,
+      "thickness_err": 0.0020326077938079834,
+      "z_bottom_err": 0.019912888761609793,
+      "hole_count_correct": true,
+      "center_err": 0.07942476749836141,
+      "radius_err": 0.08351072351816313,
+      "through_correct": true
+    },
+    "seconds": 3.9133522140000423,
+    "n_tool_calls": 4,
+    "agent_result": {
+      "agent": "scripted",
+      "finished": true,
+      "n_tool_calls": 4,
+      "usage": {},
+      "stop_reason": "finished",
+      "notes": [],
+      "final_answer": {
+        "family": "flange",
+        "outline": "disk",
+        "size_x": 66.02371335029602,
+        "size_y": 65.95974266552366,
+        "thickness": 8.502032607793808,
+        "z_bottom": -4.01991288876161,
+        "holes": [
+          {
+            "cx": 0.02919895079996333,
+            "cy": -0.07386281178204691,
+            "radius": 10.583510723518163,
+            "through": true,
+            "depth": null,
+            "cb_radius": null,
+            "cb_depth": null
+          }
+        ],
+        "rationale": "architecture [[64, 3], [64, 64], [64, 64], [1, 64]] (8641 params) decoded from 8 tensors; first-layer column norms (x, y, z) = {'min': 2.665663, 'mean': 2.940153, 'max': 3.357486}\ntop-view footprint fill ratio 0.780 → outline 'disk' (rectangle ≈ 1.0, disk ≈ π/4 ≈ 0.785)\nthickness 8.50 mm: median of Z bisections along typical full-thickness columns\nhole 0: empty region enclosed by material below the top face; circle fit to bisected boundary points → centre (0.03, -0.07), R10.58 mm (rms 0.153); through\n578657 field evaluations of the decoded program (numpy, in the sandbox)"
+      },
+      "transcript": [
+        {
+          "tool": "list_parameters",
+          "input": {},
+          "ok": true,
+          "output": "[{\"name\": \"net.0.weight\", \"shape\": [64, 3], \"numel\": 192, \"dtype\": \"float32\"}, {\"name\": \"net.0.bias\", \"shape\": [64], \"numel\": 64, \"dtype\": \"float32\"}, {\"name\": \"net.2.weight\", \"shape\": [64, 64], \"numel\": 4096, \"dtype\": \"float32\"}, {\"name\": \"net.2.bias\", \"shape\": [64], \"numel\": 64, \"dtype\": \"float32\"}, {\"name\": \"net.4.weight\", \"shape\": [64, 64], \"numel\": 4096, \"dtype\": \"float32\"}, {\"name\": \"net.4.bias\", \"shape\": [64], \"numel\": 64, \"dtype\": \"float32\"}, {\"name\": \"net.6.weight\", \"shape\": [1, 64], \"n",
+          "seconds": 0.0
+        },
+        {
+          "tool": "tensor_stats",
+          "input": {
+            "name": "net.0.weight"
+          },
+          "ok": true,
+          "output": "{\"name\": \"net.0.weight\", \"shape\": [64, 3], \"mean\": -0.022389, \"std\": 0.369712, \"min\": -0.67318, \"max\": 0.733369, \"l2\": 5.118928, \"abs_mean\": 0.312343, \"frac_near_zero\": 0.0, \"row_norms\": {\"min\": 0.079126, \"mean\": 0.619573, \"max\": 0.976717}, \"col_norms\": {\"min\": 2.665663, \"mean\": 2.940153, \"max\": 3.357486}, \"argmax_col_norm\": 2}",
+          "seconds": 0.001
+        },
+        {
+          "tool": "run_python",
+          "input": {
+            "code": "\"\"\"Read a 3D machine part out of the raw weights of a ReLU SDF network (numpy only).\n\nThis file is what an agent *submits to the sandbox* (``run_python``): it receives the raw\n``weights`` dict (``name -> ndarray``) and the ``meta`` model card, re-implements the forward\npass from the weight matrices alone, and returns a structured description of the part in\n``RESULT``. It can also be imported in-process (``read_part``) for verification loops.\n\nStrategy (the \"program comprehension\" of an SDF network):\n1. Decode the architecture from tensor names/shapes → list of (W, b).\n2. Evaluate the decoded program on a coarse grid → occupancy (sdf < 0).\n3. Refine planar extents (thickness, outline) with bisection along axis-aligned rays.\n4. Find holes in a slice just below the top face (empty regions not connected to the outside),\n   fit circles to bisection-refined boundary points, then classify each hole by probing its\n   axis (through vs. blind) and its radius profile along Z (counterbore).\n\"\"\"\n\nimport re\n\nimport numpy as np\n\n# ------------------------------------------------------------------------------------------------\n# Architecture decoding and the forward pass\n# ------------------------------------------------------------------------------------------------\n\n\ndef layers_from_weights(weights):\n    \"\"\"Group ``<prefix>.<idx>.weight`` / ``.bias`` tensors into an ordered list of (W, b).\"\"\"\n    idx = {}\n    for name in weights:\n        m = re.match(r\"^(.*?)(\\d+)\\.(weight|bias)$\", name)\n        if m:\n            idx.setdefault(int(m.group(2)), {})[m.group(3)] = np.asarray(weights[name], dtype=np.float64)\n    return [(idx[k][\"weight\"], idx[k][\"bias\"]) for k in sorted(idx)]\n\n\ndef forward(layers, x, max_floats=8_000_000):\n    \"\"\"Forward pass in float32, chunked so that no activation exceeds ``max_floats`` values.\"\"\"\n    width = max(w.shape[0] for w, _ in layers)\n    chunk = max(1024, max_floats // width)\n    out = []\n    for i in range(0, len(x), chunk):\n        h = np.asarray(x[i : i + chunk], dtype=np.float32)\n        for j, (w, b) in enumerate(layers):\n            h = h @ w.T + b\n            if j < len(layers) - 1:\n                np.maximum(h, 0.0, out=h)\n        out.append(h[:, 0])\n    return np.concatenate(out).astype(np.float64) if out else np.zeros(0)\n\n\nclass Probe:\n    \"\"\"SDF probe in millimetres that counts how many points were evaluated.\"\"\"\n\n    def __init__(self, layers, mm_per_unit):\n        self.layers = [(np.asarray(w, np.float32), np.asarray(b, np.float32)) for w, b in layers]\n        self.s, self.n_eval = float(mm_per_unit), 0\n\n    def __call__(self, p_mm):\n        p = np.atleast_2d(np.asarray(p_mm, dtype=np.float64))\n        self.n_eval += len(p)\n        return forward(self.layers, p / self.s) * self.s\n\n\ndef bisect(f, p_in, p_out, iters=30):\n    \"\"\"Boundary point on the segment between an inside (f<0) and an outside (f>=0) point.\"\"\"\n    a, b = np.asarray(p_in, float), np.asarray(p_out, float)\n    for _ in range(iters):\n        mid = 0.5 * (a + b)\n        if f(mid)[0] < 0:\n            a = mid\n        else:\n            b = mid\n    return 0.5 * (a + b)\n\n\ndef march_to_boundary(f, origin, direction, t_max, step, want_inside):\n    \"\"\"First point along a ray where ``(f<0) == want_inside``; refined by bisection.\"\"\"\n    direction = np.asarray(direction, float) / np.linalg.norm(direction)\n    ts = np.arange(step, t_max + 1e-9, step)\n    pts = np.asarray(origin, float)[None, :] + ts[:, None] * direction[None, :]\n    inside = f(pts) < 0\n    hit = np.nonzero(inside == want_inside)[0]\n    if len(hit) == 0:\n        return None\n    k = int(hit[0])\n    prev = np.asarray(origin, float) if k == 0 else pts[k - 1]\n    p_in, p_out = (pts[k], prev) if want_inside else (prev, pts[k])\n    return bisect(f, p_in, p_out)\n\n\ndef fit_circle(pts):\n    \"\"\"Algebraic (Kåsa) least-squares circle fit → (cx, cy, r, rms_residual).\"\"\"\n    x, y = pts[:, 0], pts[:, 1]\n    a = np.stack([x, y, np.ones_like(x)], axis=1)\n    sol, *_ = np.linalg.lstsq(a, x**2 + y**2, rcond=None)\n    cx, cy = sol[0] / 2, sol[1] / 2\n    r = float(np.sqrt(max(sol[2] + cx**2 + cy**2, 0.0)))\n    res = np.hypot(x - cx, y - cy) - r\n    return float(cx), float(cy), r, float(np.sqrt(np.mean(res**2)))\n\n\ndef label_components(mask):\n    \"\"\"4-connected component labelling (iterative flood fill, numpy only).\"\"\"\n    labels = np.zeros(mask.shape, dtype=np.int64)\n    current = 0\n    for seed in zip(*np.nonzero(mask), strict=True):\n        if labels[seed]:\n            continue\n        current += 1\n        stack = [seed]\n        labels[seed] = current\n        while stack:\n            i, j = stack.pop()\n            for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)):\n                a, b = i + di, j + dj\n                if 0 <= a < mask.shape[0] and 0 <= b < mask.shape[1] and mask[a, b] and not labels[a, b]:\n                    labels[a, b] = current\n                    stack.append((a, b))\n    return labels, current\n\n\n# ------------------------------------------------------------------------------------------------\n# Part reading\n# ------------------------------------------------------------------------------------------------\n\n\ndef read_part(layers, mm_per_unit=50.0, coarse_mm=1.25, slice_mm=0.5, n_rays=48):\n    f = Probe(layers, mm_per_unit)\n    half = mm_per_unit  # workspace is [-1, 1]^3 in normalised units\n    axis = np.arange(-half, half + 1e-9, coarse_mm)\n    gx, gy, gz = np.meshgrid(axis, axis, axis, indexing=\"ij\")\n    occ = (f(np.stack([gx, gy, gz], -1).reshape(-1, 3)) < 0).reshape(gx.shape)\n    if not occ.any():\n        return {\"empty\": True, \"n_eval\": f.n_eval}\n\n    # --- vertical extent: bisection along typical full-thickness columns -----------------------------\n    # The modal column fill (not the max, which picks up local bulges of the fitted field) identifies\n    # ordinary full-thickness material; 15 columns spread over it give a robust median.\n    column_fill = occ.sum(axis=2)\n    fills, counts = np.unique(column_fill[column_fill > 0], return_counts=True)\n    full = np.argwhere(column_fill == fills[np.argmax(counts)])\n    picks = full[np.linspace(0, len(full) - 1, min(15, len(full))).astype(int)]\n    tops, bots = [], []\n    for i, j in picks:\n        ks = np.nonzero(occ[i, j])[0]\n        x0, y0, z_in = axis[i], axis[j], axis[ks[len(ks) // 2]]\n        tops.append(bisect(f, [x0, y0, z_in], [x0, y0, min(axis[ks[-1]] + coarse_mm, half)])[2])\n        bots.append(bisect(f, [x0, y0, z_in], [x0, y0, max(axis[ks[0]] - coarse_mm, -half)])[2])\n    z_top, z_bot = float(np.median(tops)), float(np.median(bots))\n    thickness = z_top - z_bot\n\n    # --- top-view slice just below the top face ---------------------------------------------------\n    z_probe = z_top - 0.2 * thickness\n    ii, jj = np.nonzero(occ.any(axis=2))\n    lo = np.array([axis[ii.min()] - 2 * coarse_mm, axis[jj.min()] - 2 * coarse_mm])\n    hi = np.array([axis[ii.max()] + 2 * coarse_mm, axis[jj.max()] + 2 * coarse_mm])\n    sx = np.arange(lo[0], hi[0] + 1e-9, slice_mm)\n    sy = np.arange(lo[1], hi[1] + 1e-9, slice_mm)\n    px, py = np.meshgrid(sx, sy, indexing=\"ij\")\n    sl = np.stack([px, py, np.full_like(px, z_probe)], -1).reshape(-1, 3)\n    solid = (f(sl) < 0).reshape(px.shape)\n\n    empty_labels, n_lab = label_components(~solid)\n    border = set(\n        np.unique(np.concatenate([empty_labels[0], empty_labels[-1], empty_labels[:, 0], empty_labels[:, -1]]))\n    )\n    filled = solid.copy()\n    hole_regions = []\n    for lab in range(1, n_lab + 1):\n        if lab in border:\n            continue\n        region = empty_labels == lab\n        filled |= region\n        if region.sum() * slice_mm**2 > 4.0:  # ignore specks < 4 mm^2\n            hole_regions.append(region)\n\n    # --- outline: rectangle vs disk from the fill ratio of the hole-free footprint ---------------\n    fi, fj = np.nonzero(filled)\n    ext_x = (sx[fi.min()], sx[fi.max()])\n    ext_y = (sy[fj.min()], sy[fj.max()])\n    cx0, cy0 = filled_centroid = (float(px[filled].mean()), float(py[filled].mean()))\n    z_mid = 0.5 * (z_top + z_bot)\n\n    # refine extents: march *inward* from outside along the X / Y lines through the footprint\n    # centroid, so that the first boundary met is the outer contour (not a hole wall)\n    def edge(start, direction, length):\n        p = march_to_boundary(f, start, direction, length, 0.25, True)\n        return start if p is None else p\n\n    span_x, span_y = ext_x[1] - ext_x[0] + 4 * slice_mm, ext_y[1] - ext_y[0] + 4 * slice_mm\n    xmax = edge([ext_x[1] + 2 * slice_mm, cy0, z_mid], [-1.0, 0, 0], span_x)[0]\n    xmin = edge([ext_x[0] - 2 * slice_mm, cy0, z_mid], [1.0, 0, 0], span_x)[0]\n    ymax = edge([cx0, ext_y[1] + 2 * slice_mm, z_mid], [0, -1.0, 0], span_y)[1]\n    ymin = edge([cx0, ext_y[0] - 2 * slice_mm, z_mid], [0, 1.0, 0], span_y)[1]\n    bbox_area = (ext_x[1] - ext_x[0] + slice_mm) * (ext_y[1] - ext_y[0] + slice_mm)\n    fill_ratio = float(filled.sum() * slice_mm**2 / bbox_area)\n    outline = \"rect\" if fill_ratio > 0.9 else \"disk\"\n\n    # --- holes ----------------------------------------------------------------------------------\n    holes = []\n    z_low = z_bot + 0.2 * thickness\n    for region in sorted(hole_regions, key=lambda r: -r.sum()):\n        hx, hy = float(px[region].mean()), float(py[region].mean())\n        r_eq = float(np.sqrt(region.sum() * slice_mm**2 / np.pi))\n        reach = 3.0 * r_eq + 5.0\n\n        def ring(z, hx=hx, hy=hy, reach=reach):\n            pts = []\n            for th in np.linspace(0, 2 * np.pi, n_rays, endpoint=False):\n                p = march_to_boundary(f, [hx, hy, z], [np.cos(th), np.sin(th), 0.0], reach, 0.25, True)\n                if p is not None:\n                    pts.append(p[:2])\n            return fit_circle(np.array(pts)) if len(pts) >= 8 else None\n\n        top = ring(z_probe)\n        if top is None:\n            continue\n        cx, cy, r_top, rms = top\n        # through vs blind: march down the axis from the probe slice, looking for material\n        floor = march_to_boundary(f, [cx, cy, z_probe], [0, 0, -1.0], z_probe - z_bot + 1.0, 0.25, True)\n        through = floor is None or floor[2] <= z_bot + 0.05 * thickness\n        hole = {\n            \"cx\": cx,\n            \"cy\": cy,\n            \"radius\": r_top,\n            \"through\": bool(through),\n            \"depth\": None,\n            \"cb_radius\": None,\n            \"cb_depth\": None,\n            \"circle_rms_mm\": rms,\n        }\n        # Radii are re-measured in the middle of each cylindrical segment: near the faces the\n        # fitted network rounds the edges, which biases ring measurements.\n        if not through:\n            z_floor = float(floor[2])\n            hole[\"depth\"] = float(z_top - z_floor)\n            mid = ring(0.5 * (z_top + z_floor))\n            if mid is not None:\n                hole.update(cx=mid[0], cy=mid[1], radius=mid[2], circle_rms_mm=mid[3])\n        else:\n            low = ring(z_low)\n            if low is not None and r_top > 1.2 * low[2]:\n                # counterbore: the probe slice cuts the counterbore; the low slice the hole itself\n                r_mid = 0.5 * (r_top + low[2])\n                cb_floor = march_to_boundary(f, [low[0] + r_mid, low[1], z_probe], [0, 0, -1.0], thickness, 0.25, True)\n                z_cb = float(cb_floor[2]) if cb_floor is not None else z_mid\n                inner = ring(0.5 * (z_bot + z_cb)) or low\n                outer = ring(0.5 * (z_top + z_cb)) or top\n                hole.update(\n                    cx=inner[0],\n                    cy=inner[1],\n                    radius=inner[2],\n                    circle_rms_mm=inner[3],\n                    cb_radius=outer[2],\n                    cb_depth=None if cb_floor is None else float(z_top - z_cb),\n                )\n            else:\n                mid = ring(z_mid)\n                if mid is not None:\n                    hole.update(cx=mid[0], cy=mid[1], radius=mid[2], circle_rms_mm=mid[3])\n        holes.append(hole)\n\n    if outline == \"disk\":\n        family = \"flange\"\n    elif not holes:\n        family = \"plate\"\n    elif holes[0][\"cb_radius\"] is not None:\n        family = \"counterbore\"\n    elif not holes[0][\"through\"]:\n        family = \"blind_hole\"\n    else:\n        family = \"through_hole\"\n\n    return {\n        \"family\": family,\n        \"outline\": outline,\n        \"size_x\": float(xmax - xmin),\n        \"size_y\": float(ymax - ymin),\n        \"center_x\": float(0.5 * (xmax + xmin)),\n        \"center_y\": float(0.5 * (ymax + ymin)),\n        \"thickness\": float(thickness),\n        \"z_bottom\": float(z_bot),\n        \"z_top\": float(z_top),\n        \"holes\": holes,\n        \"footprint_fill_ratio\": fill_ratio,\n        \"footprint_centroid\": [round(v, 3) for v in filled_centroid],\n        \"n_eval\": f.n_eval,\n    }\n\n\ndef architecture(layers):\n    return {\n        \"n_layers\": len(layers),\n        \"shapes\": [list(w.shape) for w, _ in layers],\n        \"n_params\": int(sum(w.size + b.size for w, b in layers)),\n        \"first_layer_axis_norms\": np.linalg.norm(layers[0][0], axis=0).round(3).tolist(),\n    }\n\n\nif __name__ == \"__sandbox__\":  # executed inside the sandbox: `weights` and `meta` are injected\n    _layers = layers_from_weights(weights)\n    RESULT = {\"architecture\": architecture(_layers), **read_part(_layers, meta.get(\"mm_per_unit\", 50.0))}\n"
+          },
+          "ok": true,
+          "output": "{\"ok\": true, \"stdout\": \"\", \"error\": null, \"result\": {\"architecture\": {\"n_layers\": 4, \"shapes\": [[64, 3], [64, 64], [64, 64], [1, 64]], \"n_params\": 8641, \"first_layer_axis_norms\": [2.666, 2.797, 3.357]}, \"family\": \"flange\", \"outline\": \"disk\", \"size_x\": 66.02371335029602, \"size_y\": 65.95974266552366, \"center_x\": 0.01155585062224418, \"center_y\": -0.019866228103637695, \"thickness\": 8.502032607793808, \"z_bottom\": -4.01991288876161, \"z_top\": 4.482119719032198, \"holes\": [{\"cx\": 0.02919895079996333, \"cy",
+          "seconds": 3.912
+        },
+        {
+          "tool": "submit_reading",
+          "input": {
+            "family": "flange",
+            "outline": "disk",
+            "size_x": 66.02371335029602,
+            "size_y": 65.95974266552366,
+            "thickness": 8.502032607793808,
+            "z_bottom": -4.01991288876161,
+            "holes": [
+              {
+                "cx": 0.02919895079996333,
+                "cy": -0.07386281178204691,
+                "radius": 10.583510723518163,
+                "through": true,
+                "depth": null,
+                "cb_radius": null,
+                "cb_depth": null
+              }
+            ],
+            "rationale": "architecture [[64, 3], [64, 64], [64, 64], [1, 64]] (8641 params) decoded from 8 tensors; first-layer column norms (x, y, z) = {'min': 2.665663, 'mean': 2.940153, 'max': 3.357486}\ntop-view footprint fill ratio 0.780 → outline 'disk' (rectangle ≈ 1.0, disk ≈ π/4 ≈ 0.785)\nthickness 8.50 mm: median of Z bisections along typical full-thickness columns\nhole 0: empty region enclosed by material below the top face; circle fit to bisected boundary points → centre (0.03, -0.07), R10.58 mm (rms 0.153); through\n578657 field evaluations of the decoded program (numpy, in the sandbox)"
+          },
+          "ok": true,
+          "output": "{\"status\": \"accepted\"}",
+          "seconds": 0.0
+        }
+      ]
+    }
+  }
+]

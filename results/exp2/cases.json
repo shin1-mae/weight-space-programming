@@ -1,0 +1,1305 @@
+[
+  {
+    "case": "ecn1_translate_z",
+    "part": "through_hole_0",
+    "ecn": "部品全体をZ方向に+5mmオフセットせよ。",
+    "gt_spec": {
+      "name": "through_hole_0",
+      "outline": "rect",
+      "size_x": 76.5,
+      "size_y": 50.0,
+      "thickness": 11.5,
+      "z_bottom": 2.0,
+      "center_x": 0.0,
+      "center_y": 0.0,
+      "holes": [
+        {
+          "cx": -14.5,
+          "cy": 1.0,
+          "radius": 10.5,
+          "depth": null,
+          "cb_radius": null,
+          "cb_depth": null
+        }
+      ],
+      "family": "through_hole"
+    },
+    "gt_offset_mm": 0.0,
+    "methods": {
+      "no_edit": {
+        "gradient_steps": 0,
+        "seconds": 0.0,
+        "chamfer_mm": 3.369660450598122,
+        "p95_mm": 5.104162037170231,
+        "iou": 0.3539451594851707,
+        "watertight": true,
+        "components": 1,
+        "n_params": 8641,
+        "depth": 4,
+        "readback": {
+          "family": "through_hole",
+          "thickness_err": 0.0477479062974453,
+          "z_bottom_err": 5.011715690954588,
+          "n_holes": 1,
+          "n_holes_gt": 1,
+          "main_hole_diameter_err": 0.06404237533554635,
+          "main_hole_center_err": 0.03273562084968376
+        }
+      },
+      "wsp_edit": {
+        "gradient_steps": 0,
+        "seconds": 7.887333732000116,
+        "ops": [
+          {
+            "op": "translate",
+            "args": {
+              "reason": "ECN: rigid offset of the whole part",
+              "dx": 0.0,
+              "dy": 0.0,
+              "dz": 5.0
+            },
+            "reason": "ECN: rigid offset of the whole part",
+            "params_before": 8641,
+            "params_after": 8641
+          }
+        ],
+        "agent": {
+          "agent": "scripted",
+          "finished": true,
+          "n_tool_calls": 4,
+          "usage": {},
+          "stop_reason": "finished",
+          "notes": [
+            "parsed ECN into ops: [{'op': 'translate', 'dx': 0.0, 'dy': 0.0, 'dz': 5.0}]",
+            "verification read-back: family through_hole → through_hole, thickness 11.55 → 11.55 mm, z_bottom -3.01 → 1.99 mm, holes Ø [21.06] → [21.06] mm"
+          ],
+          "final_answer": {
+            "summary": "parsed ECN into ops: [{'op': 'translate', 'dx': 0.0, 'dy': 0.0, 'dz': 5.0}]; verification read-back: family through_hole → through_hole, thickness 11.55 → 11.55 mm, z_bottom -3.01 → 1.99 mm, holes Ø [21.06] → [21.06] mm"
+          },
+          "transcript": [
+            {
+              "tool": "read_part",
+              "input": {},
+              "ok": true,
+              "output": "{\"architecture\": {\"n_layers\": 4, \"shapes\": [[64, 3], [64, 64], [64, 64], [1, 64]], \"n_params\": 8641, \"first_layer_axis_norms\": [2.529, 2.817, 3.293]}, \"family\": \"through_hole\", \"outline\": \"rect\", \"size_x\": 76.42653286480345, \"size_y\": 50.012800842523575, \"center_x\": -0.03567337989807129, \"center_y\": 0.00937841844279319, \"thickness\": 11.547747906297445, \"z_bottom\": -3.0117156909545884, \"z_top\": 8.536032215342857, \"holes\": [{\"cx\": -14.487969357392243, \"cy\": 1.0304447780556647, \"radius\": 10.5320211",
+              "seconds": 4.013
+            },
+            {
+              "tool": "translate",
+              "input": {
+                "dx": 0.0,
+                "dy": 0.0,
+                "dz": 5.0,
+                "reason": "ECN: rigid offset of the whole part"
+              },
+              "ok": true,
+              "output": "{\"applied\": \"translate\", \"layer_shapes\": [[64, 3], [64, 64], [64, 64], [1, 64]], \"n_params\": 8641, \"n_ops\": 1}",
+              "seconds": 0.001
+            },
+            {
+              "tool": "read_part",
+              "input": {},
+              "ok": true,
+              "output": "{\"architecture\": {\"n_layers\": 4, \"shapes\": [[64, 3], [64, 64], [64, 64], [1, 64]], \"n_params\": 8641, \"first_layer_axis_norms\": [2.529, 2.817, 3.293]}, \"family\": \"through_hole\", \"outline\": \"rect\", \"size_x\": 76.42653584480286, \"size_y\": 50.012799352640286, \"center_x\": -0.03567486989777535, \"center_y\": 0.009379163384437561, \"thickness\": 11.547749023884535, \"z_bottom\": 1.9882832671282813, \"z_top\": 13.536032291012816, \"holes\": [{\"cx\": -14.487969354434911, \"cy\": 1.0304446520146953, \"radius\": 10.532021",
+              "seconds": 3.872
+            },
+            {
+              "tool": "finish",
+              "input": {
+                "summary": "parsed ECN into ops: [{'op': 'translate', 'dx': 0.0, 'dy': 0.0, 'dz': 5.0}]; verification read-back: family through_hole → through_hole, thickness 11.55 → 11.55 mm, z_bottom -3.01 → 1.99 mm, holes Ø [21.06] → [21.06] mm"
+              },
+              "ok": true,
+              "output": "{\"status\": \"accepted\"}",
+              "seconds": 0.0
+            }
+          ]
+        },
+        "chamfer_mm": 0.22663246696662198,
+        "p95_mm": 0.4291033183918692,
+        "iou": 0.9204762495349126,
+        "watertight": true,
+        "components": 1,
+        "n_params": 8641,
+        "depth": 4,
+        "readback": {
+          "family": "through_hole",
+          "thickness_err": 0.047749023884534836,
+          "z_bottom_err": 0.011716732871718705,
+          "n_holes": 1,
+          "n_holes_gt": 1,
+          "main_hole_diameter_err": 0.06404201875649207,
+          "main_hole_center_err": 0.03273550471596057
+        }
+      },
+      "write_from_read": {
+        "gradient_steps": 0,
+        "seconds": 0.7710292589999881,
+        "chamfer_mm": 0.21465327585246896,
+        "p95_mm": 0.41227196719860865,
+        "iou": 0.8957594188207467,
+        "watertight": true,
+        "components": 1,
+        "n_params": 14599,
+        "depth": 8,
+        "readback": {
+          "family": "through_hole",
+          "thickness_err": 0.04774567112326622,
+          "z_bottom_err": 0.011714870226569474,
+          "n_holes": 1,
+          "n_holes_gt": 1,
+          "main_hole_diameter_err": 0.0631494750017012,
+          "main_hole_center_err": 0.03273572763143558
+        }
+      },
+      "retrain": {
+        "gradient_steps": 3000,
+        "seconds": 14.964651718000823,
+        "chamfer_mm": 0.23213470234863823,
+        "p95_mm": 0.44750472498746635,
+        "iou": 0.9187749337165795,
+        "watertight": true,
+        "components": 1,
+        "n_params": 8641,
+        "depth": 4,
+        "readback": {
+          "family": "through_hole",
+          "thickness_err": 0.02316136285662651,
+          "z_bottom_err": 0.01804749120492488,
+          "n_holes": 1,
+          "n_holes_gt": 1,
+          "main_hole_diameter_err": 0.12023991471231454,
+          "main_hole_center_err": 0.06790914503215059
+        }
+      }
+    }
+  },
+  {
+    "case": "ecn2_readme_example",
+    "part": "through_hole_0",
+    "ecn": "中心の穴の直径を2倍に広げ、Z軸方向に+5mmオフセットせよ。",
+    "gt_spec": {
+      "name": "through_hole_0",
+      "outline": "rect",
+      "size_x": 76.5,
+      "size_y": 50.0,
+      "thickness": 11.5,
+      "z_bottom": 2.0,
+      "center_x": 0.0,
+      "center_y": 0.0,
+      "holes": [
+        {
+          "cx": -14.5,
+          "cy": 1.0,
+          "radius": 21.0,
+          "depth": null,
+          "cb_radius": null,
+          "cb_depth": null
+        }
+      ],
+      "family": "through_hole"
+    },
+    "gt_offset_mm": 0.0,
+    "methods": {
+      "no_edit": {
+        "gradient_steps": 0,
+        "seconds": 0.0,
+        "chamfer_mm": 3.6875496550277327,
+        "p95_mm": 10.53900140775097,
+        "iou": 0.27037165281625114,
+        "watertight": true,
+        "components": 1,
+        "n_params": 8641,
+        "depth": 4,
+        "readback": {
+          "family": "through_hole",
+          "thickness_err": 0.0477479062974453,
+          "z_bottom_err": 5.011715690954588,
+          "n_holes": 1,
+          "n_holes_gt": 1,
+          "main_hole_diameter_err": 20.935957624664454,
+          "main_hole_center_err": 0.03273562084968376
+        }
+      },
+      "wsp_edit": {
+        "gradient_steps": 0,
+        "seconds": 9.624558882999736,
+        "ops": [
+          {
+            "op": "cut_hole",
+            "args": {
+              "reason": "ECN: main hole Ø21.06 → Ø42.13",
+              "cx": -14.487969357392243,
+              "cy": 1.0304447780556647,
+              "diameter": 42.12808475067109,
+              "depth": null,
+              "z_top": 8.536032215342857,
+              "n_sides": 64
+            },
+            "reason": "ECN: main hole Ø21.06 → Ø42.13",
+            "params_before": 8641,
+            "params_after": 39891
+          },
+          {
+            "op": "translate",
+            "args": {
+              "reason": "ECN: rigid offset of the whole part",
+              "dx": 0.0,
+              "dy": 0.0,
+              "dz": 5.0
+            },
+            "reason": "ECN: rigid offset of the whole part",
+            "params_before": 39891,
+            "params_after": 39891
+          }
+        ],
+        "agent": {
+          "agent": "scripted",
+          "finished": true,
+          "n_tool_calls": 5,
+          "usage": {},
+          "stop_reason": "finished",
+          "notes": [
+            "parsed ECN into ops: [{'op': 'scale_main_hole', 'factor': 2.0}, {'op': 'translate', 'dx': 0.0, 'dy': 0.0, 'dz': 5.0}]",
+            "verification read-back: family through_hole → through_hole, thickness 11.55 → 11.51 mm, z_bottom -3.01 → 1.98 mm, holes Ø [21.06] → [42.13] mm"
+          ],
+          "final_answer": {
+            "summary": "parsed ECN into ops: [{'op': 'scale_main_hole', 'factor': 2.0}, {'op': 'translate', 'dx': 0.0, 'dy': 0.0, 'dz': 5.0}]; verification read-back: family through_hole → through_hole, thickness 11.55 → 11.51 mm, z_bottom -3.01 → 1.98 mm, holes Ø [21.06] → [42.13] mm"
+          },
+          "transcript": [
+            {
+              "tool": "read_part",
+              "input": {},
+              "ok": true,
+              "output": "{\"architecture\": {\"n_layers\": 4, \"shapes\": [[64, 3], [64, 64], [64, 64], [1, 64]], \"n_params\": 8641, \"first_layer_axis_norms\": [2.529, 2.817, 3.293]}, \"family\": \"through_hole\", \"outline\": \"rect\", \"size_x\": 76.42653286480345, \"size_y\": 50.012800842523575, \"center_x\": -0.03567337989807129, \"center_y\": 0.00937841844279319, \"thickness\": 11.547747906297445, \"z_bottom\": -3.0117156909545884, \"z_top\": 8.536032215342857, \"holes\": [{\"cx\": -14.487969357392243, \"cy\": 1.0304447780556647, \"radius\": 10.5320211",
+              "seconds": 4.622
+            },
+            {
+              "tool": "cut_hole",
+              "input": {
+                "cx": -14.487969357392243,
+                "cy": 1.0304447780556647,
+                "diameter": 42.12808475067109,
+                "depth": null,
+                "z_top": 8.536032215342857,
+                "reason": "ECN: main hole Ø21.06 → Ø42.13"
+              },
+              "ok": true,
+              "output": "{\"applied\": \"cut_hole\", \"layer_shapes\": [[192, 3], [128, 192], [96, 128], [18, 96], [10, 18], [6, 10], [4, 6], [1, 4]], \"n_params\": 39891, \"n_ops\": 1}",
+              "seconds": 0.001
+            },
+            {
+              "tool": "translate",
+              "input": {
+                "dx": 0.0,
+                "dy": 0.0,
+                "dz": 5.0,
+                "reason": "ECN: rigid offset of the whole part"
+              },
+              "ok": true,
+              "output": "{\"applied\": \"translate\", \"layer_shapes\": [[192, 3], [128, 192], [96, 128], [18, 96], [10, 18], [6, 10], [4, 6], [1, 4]], \"n_params\": 39891, \"n_ops\": 2}",
+              "seconds": 0.0
+            },
+            {
+              "tool": "read_part",
+              "input": {},
+              "ok": true,
+              "output": "{\"architecture\": {\"n_layers\": 8, \"shapes\": [[192, 3], [128, 192], [96, 128], [18, 96], [10, 18], [6, 10], [4, 6], [1, 4]], \"n_params\": 39891, \"first_layer_axis_norms\": [11.593, 11.659, 3.293]}, \"family\": \"through_hole\", \"outline\": \"rect\", \"size_x\": 76.42577588534914, \"size_y\": 50.01240745186806, \"center_x\": -0.03612041473388672, \"center_y\": 0.009414181229658425, \"thickness\": 11.514429841190577, \"z_bottom\": 1.9834793190238997, \"z_top\": 13.497909160214476, \"holes\": [{\"cx\": -14.487969120731762, \"cy",
+              "seconds": 5.0
+            },
+            {
+              "tool": "finish",
+              "input": {
+                "summary": "parsed ECN into ops: [{'op': 'scale_main_hole', 'factor': 2.0}, {'op': 'translate', 'dx': 0.0, 'dy': 0.0, 'dz': 5.0}]; verification read-back: family through_hole → through_hole, thickness 11.55 → 11.51 mm, z_bottom -3.01 → 1.98 mm, holes Ø [21.06] → [42.13] mm"
+              },
+              "ok": true,
+              "output": "{\"status\": \"accepted\"}",
+              "seconds": 0.0
+            }
+          ]
+        },
+        "chamfer_mm": 0.20696000968953604,
+        "p95_mm": 0.39227890839238966,
+        "iou": 0.9059783760864957,
+        "watertight": true,
+        "components": 1,
+        "n_params": 39891,
+        "depth": 8,
+        "readback": {
+          "family": "through_hole",
+          "thickness_err": 0.014429841190576553,
+          "z_bottom_err": 0.016520680976100266,
+          "n_holes": 1,
+          "n_holes_gt": 1,
+          "main_hole_diameter_err": 0.12620611267887938,
+          "main_hole_center_err": 0.032735658871848386
+        }
+      },
+      "write_from_read": {
+        "gradient_steps": 0,
+        "seconds": 0.7988311919998523,
+        "chamfer_mm": 0.20200741078260828,
+        "p95_mm": 0.3869492719437047,
+        "iou": 0.8840199965523186,
+        "watertight": true,
+        "components": 1,
+        "n_params": 14599,
+        "depth": 8,
+        "readback": {
+          "family": "through_hole",
+          "thickness_err": 0.04774678871035576,
+          "z_bottom_err": 0.011714497697539628,
+          "n_holes": 1,
+          "n_holes_gt": 1,
+          "main_hole_diameter_err": 0.12620271744602718,
+          "main_hole_center_err": 0.032736060053193246
+        }
+      },
+      "retrain": {
+        "gradient_steps": 3000,
+        "seconds": 15.557989993000774,
+        "chamfer_mm": 0.21450189348770232,
+        "p95_mm": 0.3995374936713479,
+        "iou": 0.8971512358609133,
+        "watertight": true,
+        "components": 1,
+        "n_params": 8641,
+        "depth": 4,
+        "readback": {
+          "family": "through_hole",
+          "thickness_err": 0.10407410934567451,
+          "z_bottom_err": 0.08797063131351024,
+          "n_holes": 1,
+          "n_holes_gt": 1,
+          "main_hole_diameter_err": 0.0033616911606202393,
+          "main_hole_center_err": 0.016504683712432845
+        }
+      }
+    }
+  },
+  {
+    "case": "ecn3_thickness",
+    "part": "plate_1",
+    "ecn": "板厚を15mmに変更せよ（下面基準）。",
+    "gt_spec": {
+      "name": "plate_1",
+      "outline": "rect",
+      "size_x": 72.0,
+      "size_y": 68.0,
+      "thickness": 15.0,
+      "z_bottom": -4.0,
+      "center_x": 0.0,
+      "center_y": 0.0,
+      "holes": [],
+      "family": "plate"
+    },
+    "gt_offset_mm": 0.0,
+    "methods": {
+      "no_edit": {
+        "gradient_steps": 0,
+        "seconds": 0.0,
+        "chamfer_mm": 0.8784499795320795,
+        "p95_mm": 2.0665275935678573,
+        "iou": 0.7890382214667057,
+        "watertight": true,
+        "components": 1,
+        "n_params": 8641,
+        "depth": 4,
+        "readback": {
+          "family": "plate",
+          "thickness_err": 2.002580794505775,
+          "z_bottom_err": 0.0030702839139848948,
+          "n_holes": 0,
+          "n_holes_gt": 0
+        }
+      },
+      "wsp_edit": {
+        "gradient_steps": 0,
+        "seconds": 8.630480126000293,
+        "ops": [
+          {
+            "op": "scale_axis",
+            "args": {
+              "reason": "ECN: thickness 13.00 → 15.0 mm",
+              "axis": "z",
+              "factor": 1.1540752639308003,
+              "pivot": -3.996929716086015
+            },
+            "reason": "ECN: thickness 13.00 → 15.0 mm",
+            "params_before": 8641,
+            "params_after": 8641
+          }
+        ],
+        "agent": {
+          "agent": "scripted",
+          "finished": true,
+          "n_tool_calls": 4,
+          "usage": {},
+          "stop_reason": "finished",
+          "notes": [
+            "parsed ECN into ops: [{'op': 'set_thickness', 'thickness': 15.0, 'pivot': 'bottom'}]",
+            "verification read-back: family plate → plate, thickness 13.00 → 15.00 mm, z_bottom -4.00 → -4.00 mm, holes Ø [] → [] mm"
+          ],
+          "final_answer": {
+            "summary": "parsed ECN into ops: [{'op': 'set_thickness', 'thickness': 15.0, 'pivot': 'bottom'}]; verification read-back: family plate → plate, thickness 13.00 → 15.00 mm, z_bottom -4.00 → -4.00 mm, holes Ø [] → [] mm"
+          },
+          "transcript": [
+            {
+              "tool": "read_part",
+              "input": {},
+              "ok": true,
+              "output": "{\"architecture\": {\"n_layers\": 4, \"shapes\": [[64, 3], [64, 64], [64, 64], [1, 64]], \"n_params\": 8641, \"first_layer_axis_norms\": [2.528, 2.607, 3.452]}, \"family\": \"plate\", \"outline\": \"rect\", \"size_x\": 71.99605405307375, \"size_y\": 67.97151863598265, \"center_x\": 0.005555152893066406, \"center_y\": 0.001519918441772461, \"thickness\": 12.997419205494225, \"z_bottom\": -3.996929716086015, \"z_top\": 9.00048948940821, \"holes\": [], \"footprint_fill_ratio\": 0.9935598377281947, \"footprint_centroid\": [-0.123, 0.008",
+              "seconds": 4.493
+            },
+            {
+              "tool": "scale_axis",
+              "input": {
+                "axis": "z",
+                "factor": 1.1540752639308003,
+                "pivot": -3.996929716086015,
+                "reason": "ECN: thickness 13.00 → 15.0 mm"
+              },
+              "ok": true,
+              "output": "{\"applied\": \"scale_axis\", \"layer_shapes\": [[64, 3], [64, 64], [64, 64], [1, 64]], \"n_params\": 8641, \"n_ops\": 1}",
+              "seconds": 0.0
+            },
+            {
+              "tool": "read_part",
+              "input": {},
+              "ok": true,
+              "output": "{\"architecture\": {\"n_layers\": 4, \"shapes\": [[64, 3], [64, 64], [64, 64], [1, 64]], \"n_params\": 8641, \"first_layer_axis_norms\": [2.528, 2.607, 2.991]}, \"family\": \"plate\", \"outline\": \"rect\", \"size_x\": 71.9960421321448, \"size_y\": 67.97151565551758, \"center_x\": 0.005555152893066406, \"center_y\": 0.0015124677447602153, \"thickness\": 15.002251604455523, \"z_bottom\": -3.9964964595856145, \"z_top\": 11.005755144869909, \"holes\": [], \"footprint_fill_ratio\": 0.9935598377281947, \"footprint_centroid\": [-0.123, 0.",
+              "seconds": 4.137
+            },
+            {
+              "tool": "finish",
+              "input": {
+                "summary": "parsed ECN into ops: [{'op': 'set_thickness', 'thickness': 15.0, 'pivot': 'bottom'}]; verification read-back: family plate → plate, thickness 13.00 → 15.00 mm, z_bottom -4.00 → -4.00 mm, holes Ø [] → [] mm"
+              },
+              "ok": true,
+              "output": "{\"status\": \"accepted\"}",
+              "seconds": 0.0
+            }
+          ]
+        },
+        "chamfer_mm": 0.24746751141109186,
+        "p95_mm": 0.47164706620132363,
+        "iou": 0.9135843313703434,
+        "watertight": true,
+        "components": 1,
+        "n_params": 8641,
+        "depth": 4,
+        "readback": {
+          "family": "plate",
+          "thickness_err": 0.002251604455523193,
+          "z_bottom_err": 0.0035035404143854976,
+          "n_holes": 0,
+          "n_holes_gt": 0
+        }
+      },
+      "write_from_read": {
+        "gradient_steps": 0,
+        "seconds": 0.6208318480003072,
+        "chamfer_mm": 0.24000654877008082,
+        "p95_mm": 0.4680434119757825,
+        "iou": 0.9861111111111112,
+        "watertight": true,
+        "components": 1,
+        "n_params": 241,
+        "depth": 4,
+        "readback": {
+          "family": "plate",
+          "thickness_err": 3.3102696761488914e-06,
+          "z_bottom_err": 0.003071028389967978,
+          "n_holes": 0,
+          "n_holes_gt": 0
+        }
+      },
+      "retrain": {
+        "gradient_steps": 3000,
+        "seconds": 17.049660585999845,
+        "chamfer_mm": 0.24762016080393157,
+        "p95_mm": 0.4724423310447222,
+        "iou": 0.9100631733466146,
+        "watertight": true,
+        "components": 1,
+        "n_params": 8641,
+        "depth": 4,
+        "readback": {
+          "family": "plate",
+          "thickness_err": 0.002832000027410686,
+          "z_bottom_err": 0.003623494761995971,
+          "n_holes": 0,
+          "n_holes_gt": 0
+        }
+      }
+    }
+  },
+  {
+    "case": "ecn4_offset_flange",
+    "part": "flange_0",
+    "ecn": "外形全体を0.5mm肉盛り（オフセット）せよ。",
+    "gt_spec": {
+      "name": "flange_0",
+      "outline": "disk",
+      "size_x": 68.0,
+      "size_y": 68.0,
+      "thickness": 9.5,
+      "z_bottom": -7.5,
+      "center_x": 0.0,
+      "center_y": 0.0,
+      "holes": [
+        {
+          "cx": 0.0,
+          "cy": 0.0,
+          "radius": 8.0,
+          "depth": null,
+          "cb_radius": null,
+          "cb_depth": null
+        }
+      ],
+      "family": "flange"
+    },
+    "gt_offset_mm": 0.5,
+    "methods": {
+      "no_edit": {
+        "gradient_steps": 0,
+        "seconds": 0.0,
+        "chamfer_mm": 0.5494119187928562,
+        "p95_mm": 0.7231202511076349,
+        "iou": 0.9256482525366404,
+        "watertight": true,
+        "components": 1,
+        "n_params": 8641,
+        "depth": 4,
+        "readback": {
+          "family": "flange",
+          "thickness_err": 0.9600408877013251,
+          "z_bottom_err": 0.45958365441765636,
+          "n_holes": 1,
+          "n_holes_gt": 1,
+          "main_hole_diameter_err": 0.7681380047680797,
+          "main_hole_center_err": 0.054207159455323936
+        }
+      },
+      "wsp_edit": {
+        "gradient_steps": 0,
+        "seconds": 14.737856233999992,
+        "ops": [
+          {
+            "op": "offset_surface",
+            "args": {
+              "reason": "ECN: offset (肉盛り) of all faces",
+              "delta": 0.5
+            },
+            "reason": "ECN: offset (肉盛り) of all faces",
+            "params_before": 8641,
+            "params_after": 8641
+          },
+          {
+            "op": "cut_hole",
+            "args": {
+              "reason": "verify-and-repair: restore expected hole size",
+              "cx": 0.04884067543401333,
+              "cy": -0.0235160489743554,
+              "diameter": 14.76813800476808,
+              "depth": null,
+              "z_top": 2.4995427667163312,
+              "n_sides": 64
+            },
+            "reason": "verify-and-repair: restore expected hole size",
+            "params_before": 8641,
+            "params_after": 39891
+          }
+        ],
+        "agent": {
+          "agent": "scripted",
+          "finished": true,
+          "n_tool_calls": 6,
+          "usage": {},
+          "stop_reason": "finished",
+          "notes": [
+            "parsed ECN into ops: [{'op': 'offset', 'delta': 0.5}]",
+            "verify: hole at (0.0, -0.0) is Ø12.34, expected Ø14.77 → re-cut",
+            "verification read-back: family flange → flange, thickness 9.54 → 10.47 mm, z_bottom -7.54 → -8.00 mm, holes Ø [15.77] → [14.77] mm"
+          ],
+          "final_answer": {
+            "summary": "parsed ECN into ops: [{'op': 'offset', 'delta': 0.5}]; verify: hole at (0.0, -0.0) is Ø12.34, expected Ø14.77 → re-cut; verification read-back: family flange → flange, thickness 9.54 → 10.47 mm, z_bottom -7.54 → -8.00 mm, holes Ø [15.77] → [14.77] mm"
+          },
+          "transcript": [
+            {
+              "tool": "read_part",
+              "input": {},
+              "ok": true,
+              "output": "{\"architecture\": {\"n_layers\": 4, \"shapes\": [[64, 3], [64, 64], [64, 64], [1, 64]], \"n_params\": 8641, \"first_layer_axis_norms\": [2.685, 2.783, 3.391]}, \"family\": \"flange\", \"outline\": \"disk\", \"size_x\": 67.9624080657959, \"size_y\": 67.98879206203856, \"center_x\": 0.019384920713491738, \"center_y\": 0.041544437408447266, \"thickness\": 9.539959112298675, \"z_bottom\": -7.540416345582344, \"z_top\": 1.9995427667163312, \"holes\": [{\"cx\": 0.04884067543401333, \"cy\": -0.0235160489743554, \"radius\": 7.88406900238404,",
+              "seconds": 5.114
+            },
+            {
+              "tool": "offset_surface",
+              "input": {
+                "delta": 0.5,
+                "reason": "ECN: offset (肉盛り) of all faces"
+              },
+              "ok": true,
+              "output": "{\"applied\": \"offset_surface\", \"layer_shapes\": [[64, 3], [64, 64], [64, 64], [1, 64]], \"n_params\": 8641, \"n_ops\": 1}",
+              "seconds": 0.0
+            },
+            {
+              "tool": "read_part",
+              "input": {},
+              "ok": true,
+              "output": "{\"architecture\": {\"n_layers\": 4, \"shapes\": [[64, 3], [64, 64], [64, 64], [1, 64]], \"n_params\": 8641, \"first_layer_axis_norms\": [2.685, 2.783, 3.391]}, \"family\": \"flange\", \"outline\": \"disk\", \"size_x\": 68.84782910346985, \"size_y\": 68.9554750919342, \"center_x\": 0.034855306264944375, \"center_y\": 0.02385526883881539, \"thickness\": 10.465014076908119, \"z_bottom\": -7.981900498853065, \"z_top\": 2.483113578055054, \"holes\": [{\"cx\": 0.06514444197937772, \"cy\": -0.11821532642222916, \"radius\": 6.17011361183453,",
+              "seconds": 4.275
+            },
+            {
+              "tool": "cut_hole",
+              "input": {
+                "cx": 0.04884067543401333,
+                "cy": -0.0235160489743554,
+                "diameter": 14.76813800476808,
+                "depth": null,
+                "z_top": 2.4995427667163312,
+                "reason": "verify-and-repair: restore expected hole size"
+              },
+              "ok": true,
+              "output": "{\"applied\": \"cut_hole\", \"layer_shapes\": [[192, 3], [128, 192], [96, 128], [18, 96], [10, 18], [6, 10], [4, 6], [1, 4]], \"n_params\": 39891, \"n_ops\": 2}",
+              "seconds": 0.001
+            },
+            {
+              "tool": "read_part",
+              "input": {},
+              "ok": true,
+              "output": "{\"architecture\": {\"n_layers\": 8, \"shapes\": [[192, 3], [128, 192], [96, 128], [18, 96], [10, 18], [6, 10], [4, 6], [1, 4]], \"n_params\": 39891, \"first_layer_axis_norms\": [11.628, 11.651, 3.391]}, \"family\": \"flange\", \"outline\": \"disk\", \"size_x\": 68.84789764857851, \"size_y\": 68.95586848258972, \"center_x\": 0.034627318382263184, \"center_y\": 0.024129450204782188, \"thickness\": 10.465877971728332, \"z_bottom\": -7.9954992985585704, \"z_top\": 2.470378673169762, \"holes\": [{\"cx\": 0.04884070254559357, \"cy\": -0.",
+              "seconds": 5.346
+            },
+            {
+              "tool": "finish",
+              "input": {
+                "summary": "parsed ECN into ops: [{'op': 'offset', 'delta': 0.5}]; verify: hole at (0.0, -0.0) is Ø12.34, expected Ø14.77 → re-cut; verification read-back: family flange → flange, thickness 9.54 → 10.47 mm, z_bottom -7.54 → -8.00 mm, holes Ø [15.77] → [14.77] mm"
+              },
+              "ok": true,
+              "output": "{\"status\": \"accepted\"}",
+              "seconds": 0.0
+            }
+          ]
+        },
+        "chamfer_mm": 0.2122207924171295,
+        "p95_mm": 0.4006175682159585,
+        "iou": 0.9558736320017251,
+        "watertight": true,
+        "components": 1,
+        "n_params": 39891,
+        "depth": 8,
+        "readback": {
+          "family": "flange",
+          "thickness_err": 0.03412202827166766,
+          "z_bottom_err": 0.004500701441429555,
+          "n_holes": 1,
+          "n_holes_gt": 1,
+          "main_hole_diameter_err": 0.23249767422132983,
+          "main_hole_center_err": 0.05420717532706705
+        }
+      },
+      "write_from_read": {
+        "gradient_steps": 0,
+        "seconds": 0.7885945739999443,
+        "chamfer_mm": 0.20777841974108088,
+        "p95_mm": 0.3968261486368863,
+        "iou": 0.9063482729527267,
+        "watertight": true,
+        "components": 1,
+        "n_params": 100227,
+        "depth": 9,
+        "readback": {
+          "family": "flange",
+          "thickness_err": 0.03995964874047786,
+          "z_bottom_err": 0.04041661380324513,
+          "n_holes": 1,
+          "n_holes_gt": 1,
+          "main_hole_diameter_err": 0.23289957893110547,
+          "main_hole_center_err": 0.05420708739931918
+        }
+      },
+      "retrain": {
+        "gradient_steps": 3000,
+        "seconds": 17.683472126000197,
+        "chamfer_mm": 0.21717744326144878,
+        "p95_mm": 0.41430678161774914,
+        "iou": 0.9410278907766345,
+        "watertight": true,
+        "components": 1,
+        "n_params": 8641,
+        "depth": 4,
+        "readback": {
+          "family": "flange",
+          "thickness_err": 0.03794948384165764,
+          "z_bottom_err": 0.01393650530371815,
+          "n_holes": 1,
+          "n_holes_gt": 1,
+          "main_hole_diameter_err": 0.0984049503355191,
+          "main_hole_center_err": 0.16764866142233414
+        }
+      }
+    }
+  },
+  {
+    "case": "ecn5_add_hole",
+    "part": "plate_0",
+    "ecn": "(x=+15, y=-10) にφ8の貫通穴を追加せよ。",
+    "gt_spec": {
+      "name": "plate_0",
+      "outline": "rect",
+      "size_x": 61.0,
+      "size_y": 50.5,
+      "thickness": 12.0,
+      "z_bottom": -7.5,
+      "center_x": 0.0,
+      "center_y": 0.0,
+      "holes": [
+        {
+          "cx": 15.0,
+          "cy": -10.0,
+          "radius": 4.0,
+          "depth": null,
+          "cb_radius": null,
+          "cb_depth": null
+        }
+      ],
+      "family": "through_hole"
+    },
+    "gt_offset_mm": 0.0,
+    "methods": {
+      "no_edit": {
+        "gradient_steps": 0,
+        "seconds": 0.0,
+        "chamfer_mm": 0.2518336205950946,
+        "p95_mm": 0.43119254287556,
+        "iou": 0.8842357475844467,
+        "watertight": true,
+        "components": 1,
+        "n_params": 8641,
+        "depth": 4,
+        "readback": {
+          "family": "plate",
+          "thickness_err": 0.05498238652944565,
+          "z_bottom_err": 0.042425168794579804,
+          "n_holes": 0,
+          "n_holes_gt": 1
+        }
+      },
+      "wsp_edit": {
+        "gradient_steps": 0,
+        "seconds": 9.656892076000076,
+        "ops": [
+          {
+            "op": "cut_hole",
+            "args": {
+              "reason": "ECN: new through hole",
+              "cx": 15.0,
+              "cy": -10.0,
+              "diameter": 8.0,
+              "depth": null,
+              "z_top": null,
+              "n_sides": 64
+            },
+            "reason": "ECN: new through hole",
+            "params_before": 8641,
+            "params_after": 39891
+          }
+        ],
+        "agent": {
+          "agent": "scripted",
+          "finished": true,
+          "n_tool_calls": 4,
+          "usage": {},
+          "stop_reason": "finished",
+          "notes": [
+            "parsed ECN into ops: [{'op': 'add_through_hole', 'cx': 15.0, 'cy': -10.0, 'diameter': 8.0}]",
+            "verification read-back: family plate → through_hole, thickness 11.95 → 11.96 mm, z_bottom -7.46 → -7.46 mm, holes Ø [] → [8.0] mm"
+          ],
+          "final_answer": {
+            "summary": "parsed ECN into ops: [{'op': 'add_through_hole', 'cx': 15.0, 'cy': -10.0, 'diameter': 8.0}]; verification read-back: family plate → through_hole, thickness 11.95 → 11.96 mm, z_bottom -7.46 → -7.46 mm, holes Ø [] → [8.0] mm"
+          },
+          "transcript": [
+            {
+              "tool": "read_part",
+              "input": {},
+              "ok": true,
+              "output": "{\"architecture\": {\"n_layers\": 4, \"shapes\": [[64, 3], [64, 64], [64, 64], [1, 64]], \"n_params\": 8641, \"first_layer_axis_norms\": [2.566, 2.656, 3.54]}, \"family\": \"plate\", \"outline\": \"rect\", \"size_x\": 60.99870800971985, \"size_y\": 50.484201312297955, \"center_x\": 0.0013992191525176167, \"center_y\": -0.013563036918640137, \"thickness\": 11.945017613470554, \"z_bottom\": -7.45757483120542, \"z_top\": 4.487442782265134, \"holes\": [], \"footprint_fill_ratio\": 0.990420993318844, \"footprint_centroid\": [-0.002, -0.0",
+              "seconds": 4.283
+            },
+            {
+              "tool": "cut_hole",
+              "input": {
+                "cx": 15.0,
+                "cy": -10.0,
+                "diameter": 8.0,
+                "reason": "ECN: new through hole"
+              },
+              "ok": true,
+              "output": "{\"applied\": \"cut_hole\", \"layer_shapes\": [[192, 3], [128, 192], [96, 128], [18, 96], [10, 18], [6, 10], [4, 6], [1, 4]], \"n_params\": 39891, \"n_ops\": 1}",
+              "seconds": 0.001
+            },
+            {
+              "tool": "read_part",
+              "input": {},
+              "ok": true,
+              "output": "{\"architecture\": {\"n_layers\": 8, \"shapes\": [[192, 3], [128, 192], [96, 128], [18, 96], [10, 18], [6, 10], [4, 6], [1, 4]], \"n_params\": 39891, \"first_layer_axis_norms\": [11.601, 11.621, 3.54]}, \"family\": \"through_hole\", \"outline\": \"rect\", \"size_x\": 60.99878549575806, \"size_y\": 50.48421621322632, \"center_x\": 0.0014856458874419332, \"center_y\": -0.013427436235360801, \"thickness\": 11.956438235938549, \"z_bottom\": -7.455124335247092, \"z_top\": 4.501313900691457, \"holes\": [{\"cx\": 14.999999821504833, \"cy\"",
+              "seconds": 5.372
+            },
+            {
+              "tool": "finish",
+              "input": {
+                "summary": "parsed ECN into ops: [{'op': 'add_through_hole', 'cx': 15.0, 'cy': -10.0, 'diameter': 8.0}]; verification read-back: family plate → through_hole, thickness 11.95 → 11.96 mm, z_bottom -7.46 → -7.46 mm, holes Ø [] → [8.0] mm"
+              },
+              "ok": true,
+              "output": "{\"status\": \"accepted\"}",
+              "seconds": 0.0
+            }
+          ]
+        },
+        "chamfer_mm": 0.1978485959642479,
+        "p95_mm": 0.3800628994765687,
+        "iou": 0.8978922592759104,
+        "watertight": true,
+        "components": 1,
+        "n_params": 39891,
+        "depth": 8,
+        "readback": {
+          "family": "through_hole",
+          "thickness_err": 0.04356176406145096,
+          "z_bottom_err": 0.04487566475290805,
+          "n_holes": 1,
+          "n_holes_gt": 1,
+          "main_hole_diameter_err": 0.00035779349838627184,
+          "main_hole_center_err": 1.7850192385239104e-07
+        }
+      },
+      "write_from_read": {
+        "gradient_steps": 0,
+        "seconds": 0.923619021000377,
+        "chamfer_mm": 0.1947417451525962,
+        "p95_mm": 0.3749313743954371,
+        "iou": 0.8861036017585538,
+        "watertight": true,
+        "components": 1,
+        "n_params": 14599,
+        "depth": 8,
+        "readback": {
+          "family": "through_hole",
+          "thickness_err": 0.05498611181974411,
+          "z_bottom_err": 0.04242665891069919,
+          "n_holes": 1,
+          "n_holes_gt": 1,
+          "main_hole_diameter_err": 0.0003577892290413942,
+          "main_hole_center_err": 1.6970992689048158e-07
+        }
+      },
+      "retrain": {
+        "gradient_steps": 3000,
+        "seconds": 16.23009961599928,
+        "chamfer_mm": 0.20381849249559403,
+        "p95_mm": 0.3879266891201007,
+        "iou": 0.8960764640650578,
+        "watertight": true,
+        "components": 1,
+        "n_params": 8641,
+        "depth": 4,
+        "readback": {
+          "family": "through_hole",
+          "thickness_err": 0.01717127056326717,
+          "z_bottom_err": 0.03820426878519356,
+          "n_holes": 1,
+          "n_holes_gt": 1,
+          "main_hole_diameter_err": 0.000807086034152249,
+          "main_hole_center_err": 0.05441259451233662
+        }
+      }
+    }
+  },
+  {
+    "case": "ecn6_shrink_hole",
+    "part": "through_hole_1",
+    "ecn": "穴径をφ10に縮小せよ。",
+    "gt_spec": {
+      "name": "through_hole_1",
+      "outline": "rect",
+      "size_x": 71.0,
+      "size_y": 57.5,
+      "thickness": 9.0,
+      "z_bottom": -2.5,
+      "center_x": 0.0,
+      "center_y": 0.0,
+      "holes": [
+        {
+          "cx": -14.5,
+          "cy": -6.5,
+          "radius": 5.0,
+          "depth": null,
+          "cb_radius": null,
+          "cb_depth": null
+        }
+      ],
+      "family": "through_hole"
+    },
+    "gt_offset_mm": 0.0,
+    "methods": {
+      "no_edit": {
+        "gradient_steps": 0,
+        "seconds": 0.0,
+        "chamfer_mm": 0.3043557643885728,
+        "p95_mm": 0.544365176419577,
+        "iou": 0.8546392021041118,
+        "watertight": true,
+        "components": 1,
+        "n_params": 8641,
+        "depth": 4,
+        "readback": {
+          "family": "through_hole",
+          "thickness_err": 0.07307090412359685,
+          "z_bottom_err": 0.05249375419225544,
+          "n_holes": 1,
+          "n_holes_gt": 1,
+          "main_hole_diameter_err": 6.018120622988636,
+          "main_hole_center_err": 0.22655096856836088
+        }
+      },
+      "wsp_edit": {
+        "gradient_steps": 0,
+        "seconds": 11.35074335399986,
+        "ops": [
+          {
+            "op": "fill_cylinder",
+            "args": {
+              "reason": "ECN: plug Ø16.02 hole before re-drilling smaller",
+              "cx": -14.340175916326132,
+              "cy": -6.339433491546117,
+              "diameter": 18.018120622988636,
+              "z_bottom": -2.5524937541922554,
+              "z_top": 6.520577149931341,
+              "n_sides": 64
+            },
+            "reason": "ECN: plug Ø16.02 hole before re-drilling smaller",
+            "params_before": 8641,
+            "params_after": 92921
+          },
+          {
+            "op": "cut_hole",
+            "args": {
+              "reason": "ECN: main hole Ø16.02 → Ø10.00",
+              "cx": -14.340175916326132,
+              "cy": -6.339433491546117,
+              "diameter": 10.0,
+              "depth": null,
+              "z_top": 6.520577149931341,
+              "n_sides": 64
+            },
+            "reason": "ECN: main hole Ø16.02 → Ø10.00",
+            "params_before": 92921,
+            "params_after": 167817
+          }
+        ],
+        "agent": {
+          "agent": "scripted",
+          "finished": true,
+          "n_tool_calls": 5,
+          "usage": {},
+          "stop_reason": "finished",
+          "notes": [
+            "parsed ECN into ops: [{'op': 'set_main_hole_diameter', 'diameter': 10.0}]",
+            "verification read-back: family through_hole → through_hole, thickness 9.07 → 9.09 mm, z_bottom -2.55 → -2.57 mm, holes Ø [16.02] → [10.0] mm"
+          ],
+          "final_answer": {
+            "summary": "parsed ECN into ops: [{'op': 'set_main_hole_diameter', 'diameter': 10.0}]; verification read-back: family through_hole → through_hole, thickness 9.07 → 9.09 mm, z_bottom -2.55 → -2.57 mm, holes Ø [16.02] → [10.0] mm"
+          },
+          "transcript": [
+            {
+              "tool": "read_part",
+              "input": {},
+              "ok": true,
+              "output": "{\"architecture\": {\"n_layers\": 4, \"shapes\": [[64, 3], [64, 64], [64, 64], [1, 64]], \"n_params\": 8641, \"first_layer_axis_norms\": [2.488, 2.672, 3.317]}, \"family\": \"through_hole\", \"outline\": \"rect\", \"size_x\": 71.04259431385435, \"size_y\": 57.47569799423218, \"center_x\": 0.0109940767288208, \"center_y\": 0.00459998834412545, \"thickness\": 9.073070904123597, \"z_bottom\": -2.5524937541922554, \"z_top\": 6.520577149931341, \"holes\": [{\"cx\": -14.340175916326132, \"cy\": -6.339433491546117, \"radius\": 8.009060311494",
+              "seconds": 4.343
+            },
+            {
+              "tool": "fill_cylinder",
+              "input": {
+                "cx": -14.340175916326132,
+                "cy": -6.339433491546117,
+                "diameter": 18.018120622988636,
+                "z_bottom": -2.5524937541922554,
+                "z_top": 6.520577149931341,
+                "reason": "ECN: plug Ø16.02 hole before re-drilling smaller"
+              },
+              "ok": true,
+              "output": "{\"applied\": \"fill_cylinder\", \"layer_shapes\": [[320, 3], [192, 320], [128, 192], [34, 128], [18, 34], [10, 18], [6, 10], [4, 6], [1, 4]], \"n_params\": 92921, \"n_ops\": 1}",
+              "seconds": 0.003
+            },
+            {
+              "tool": "cut_hole",
+              "input": {
+                "cx": -14.340175916326132,
+                "cy": -6.339433491546117,
+                "diameter": 10.0,
+                "depth": null,
+                "z_top": 6.520577149931341,
+                "reason": "ECN: main hole Ø16.02 → Ø10.00"
+              },
+              "ok": true,
+              "output": "{\"applied\": \"cut_hole\", \"layer_shapes\": [[448, 3], [256, 448], [160, 256], [50, 160], [26, 50], [14, 26], [8, 14], [6, 8], [4, 6], [1, 4]], \"n_params\": 167817, \"n_ops\": 2}",
+              "seconds": 0.001
+            },
+            {
+              "tool": "read_part",
+              "input": {},
+              "ok": true,
+              "output": "{\"architecture\": {\"n_layers\": 10, \"shapes\": [[448, 3], [256, 448], [160, 256], [50, 160], [26, 50], [14, 26], [8, 14], [6, 8], [4, 6], [1, 4]], \"n_params\": 167817, \"first_layer_axis_norms\": [16.192, 16.222, 16.34]}, \"family\": \"through_hole\", \"outline\": \"rect\", \"size_x\": 71.04256749153137, \"size_y\": 57.47559368633665, \"center_x\": 0.0109180809231475, \"center_y\": 0.004613399505615234, \"thickness\": 9.087859743158333, \"z_bottom\": -2.5658945547183976, \"z_top\": 6.5219651884399354, \"holes\": [{\"cx\": -14.",
+              "seconds": 7.002
+            },
+            {
+              "tool": "finish",
+              "input": {
+                "summary": "parsed ECN into ops: [{'op': 'set_main_hole_diameter', 'diameter': 10.0}]; verification read-back: family through_hole → through_hole, thickness 9.07 → 9.09 mm, z_bottom -2.55 → -2.57 mm, holes Ø [16.02] → [10.0] mm"
+              },
+              "ok": true,
+              "output": "{\"status\": \"accepted\"}",
+              "seconds": 0.0
+            }
+          ]
+        },
+        "chamfer_mm": 0.21973186920946763,
+        "p95_mm": 0.4157972583070782,
+        "iou": 0.8793353724920939,
+        "watertight": true,
+        "components": 1,
+        "n_params": 167817,
+        "depth": 10,
+        "readback": {
+          "family": "through_hole",
+          "thickness_err": 0.087859743158333,
+          "z_bottom_err": 0.06589455471839756,
+          "n_holes": 1,
+          "n_holes_gt": 1,
+          "main_hole_diameter_err": 0.0002188312747453125,
+          "main_hole_center_err": 0.22655134948905423
+        }
+      },
+      "write_from_read": {
+        "gradient_steps": 0,
+        "seconds": 0.8456504980003956,
+        "chamfer_mm": 0.21761235661628575,
+        "p95_mm": 0.416282468302551,
+        "iou": 0.8604639792700516,
+        "watertight": true,
+        "components": 1,
+        "n_params": 14599,
+        "depth": 8,
+        "readback": {
+          "family": "through_hole",
+          "thickness_err": 0.07306717417668551,
+          "z_bottom_err": 0.05249077396001667,
+          "n_holes": 1,
+          "n_holes_gt": 1,
+          "main_hole_diameter_err": 0.00043966139123341463,
+          "main_hole_center_err": 0.22655100804267292
+        }
+      },
+      "retrain": {
+        "gradient_steps": 3000,
+        "seconds": 14.693125529000099,
+        "chamfer_mm": 0.22679118706232992,
+        "p95_mm": 0.43991091855111336,
+        "iou": 0.8749058221402406,
+        "watertight": true,
+        "components": 1,
+        "n_params": 8641,
+        "depth": 4,
+        "readback": {
+          "family": "through_hole",
+          "thickness_err": 0.04847597877960652,
+          "z_bottom_err": 0.04207877384033054,
+          "n_holes": 1,
+          "n_holes_gt": 1,
+          "main_hole_diameter_err": 0.1511666042338824,
+          "main_hole_center_err": 0.3472299775882383
+        }
+      }
+    }
+  },
+  {
+    "case": "ecn7_enlarge_flange_bore",
+    "part": "flange_1",
+    "ecn": "中心の穴の直径を1.5倍に広げよ。",
+    "gt_spec": {
+      "name": "flange_1",
+      "outline": "disk",
+      "size_x": 66.0,
+      "size_y": 66.0,
+      "thickness": 8.5,
+      "z_bottom": -4.0,
+      "center_x": 0.0,
+      "center_y": 0.0,
+      "holes": [
+        {
+          "cx": 0.0,
+          "cy": 0.0,
+          "radius": 15.75,
+          "depth": null,
+          "cb_radius": null,
+          "cb_depth": null
+        }
+      ],
+      "family": "flange"
+    },
+    "gt_offset_mm": 0.0,
+    "methods": {
+      "no_edit": {
+        "gradient_steps": 0,
+        "seconds": 0.0,
+        "chamfer_mm": 0.5831858804663085,
+        "p95_mm": 5.12975369114414,
+        "iou": 0.7992010652463382,
+        "watertight": true,
+        "components": 1,
+        "n_params": 8641,
+        "depth": 4,
+        "readback": {
+          "family": "flange",
+          "thickness_err": 0.0020326077938079834,
+          "z_bottom_err": 0.019912888761609793,
+          "n_holes": 1,
+          "n_holes_gt": 1,
+          "main_hole_diameter_err": 10.332978552963674,
+          "main_hole_center_err": 0.07942476749836141
+        }
+      },
+      "wsp_edit": {
+        "gradient_steps": 0,
+        "seconds": 10.216792000999703,
+        "ops": [
+          {
+            "op": "cut_hole",
+            "args": {
+              "reason": "ECN: main hole Ø21.17 → Ø31.75",
+              "cx": 0.02919895079996333,
+              "cy": -0.07386281178204691,
+              "diameter": 31.75053217055449,
+              "depth": null,
+              "z_top": 4.482119719032198,
+              "n_sides": 64
+            },
+            "reason": "ECN: main hole Ø21.17 → Ø31.75",
+            "params_before": 8641,
+            "params_after": 39891
+          }
+        ],
+        "agent": {
+          "agent": "scripted",
+          "finished": true,
+          "n_tool_calls": 4,
+          "usage": {},
+          "stop_reason": "finished",
+          "notes": [
+            "parsed ECN into ops: [{'op': 'scale_main_hole', 'factor': 1.5}]",
+            "verification read-back: family flange → flange, thickness 8.50 → 8.51 mm, z_bottom -4.02 → -4.00 mm, holes Ø [21.17] → [31.75] mm"
+          ],
+          "final_answer": {
+            "summary": "parsed ECN into ops: [{'op': 'scale_main_hole', 'factor': 1.5}]; verification read-back: family flange → flange, thickness 8.50 → 8.51 mm, z_bottom -4.02 → -4.00 mm, holes Ø [21.17] → [31.75] mm"
+          },
+          "transcript": [
+            {
+              "tool": "read_part",
+              "input": {},
+              "ok": true,
+              "output": "{\"architecture\": {\"n_layers\": 4, \"shapes\": [[64, 3], [64, 64], [64, 64], [1, 64]], \"n_params\": 8641, \"first_layer_axis_norms\": [2.666, 2.797, 3.357]}, \"family\": \"flange\", \"outline\": \"disk\", \"size_x\": 66.02371335029602, \"size_y\": 65.95974266552366, \"center_x\": 0.01155585062224418, \"center_y\": -0.019866228103637695, \"thickness\": 8.502032607793808, \"z_bottom\": -4.01991288876161, \"z_top\": 4.482119719032198, \"holes\": [{\"cx\": 0.02919895079996333, \"cy\": -0.07386281178204691, \"radius\": 10.58351072351816",
+              "seconds": 4.875
+            },
+            {
+              "tool": "cut_hole",
+              "input": {
+                "cx": 0.02919895079996333,
+                "cy": -0.07386281178204691,
+                "diameter": 31.75053217055449,
+                "depth": null,
+                "z_top": 4.482119719032198,
+                "reason": "ECN: main hole Ø21.17 → Ø31.75"
+              },
+              "ok": true,
+              "output": "{\"applied\": \"cut_hole\", \"layer_shapes\": [[192, 3], [128, 192], [96, 128], [18, 96], [10, 18], [6, 10], [4, 6], [1, 4]], \"n_params\": 39891, \"n_ops\": 1}",
+              "seconds": 0.001
+            },
+            {
+              "tool": "read_part",
+              "input": {},
+              "ok": true,
+              "output": "{\"architecture\": {\"n_layers\": 8, \"shapes\": [[192, 3], [128, 192], [96, 128], [18, 96], [10, 18], [6, 10], [4, 6], [1, 4]], \"n_params\": 39891, \"first_layer_axis_norms\": [11.624, 11.654, 3.357]}, \"family\": \"flange\", \"outline\": \"disk\", \"size_x\": 66.02334678149782, \"size_y\": 65.96031188964844, \"center_x\": 0.011622905731201172, \"center_y\": -0.01992434251587838, \"thickness\": 8.513691653497517, \"z_bottom\": -4.003592769149691, \"z_top\": 4.510098884347826, \"holes\": [{\"cx\": 0.029198901541187487, \"cy\": -0.0",
+              "seconds": 5.341
+            },
+            {
+              "tool": "finish",
+              "input": {
+                "summary": "parsed ECN into ops: [{'op': 'scale_main_hole', 'factor': 1.5}]; verification read-back: family flange → flange, thickness 8.50 → 8.51 mm, z_bottom -4.02 → -4.00 mm, holes Ø [21.17] → [31.75] mm"
+              },
+              "ok": true,
+              "output": "{\"status\": \"accepted\"}",
+              "seconds": 0.0
+            }
+          ]
+        },
+        "chamfer_mm": 0.19164939354438523,
+        "p95_mm": 0.35758212368255504,
+        "iou": 0.9231958307570003,
+        "watertight": true,
+        "components": 1,
+        "n_params": 39891,
+        "depth": 8,
+        "readback": {
+          "family": "flange",
+          "thickness_err": 0.013691653497517109,
+          "z_bottom_err": 0.0035927691496908665,
+          "n_holes": 1,
+          "n_holes_gt": 1,
+          "main_hole_diameter_err": 0.2491211978677157,
+          "main_hole_center_err": 0.07942441774462106
+        }
+      },
+      "write_from_read": {
+        "gradient_steps": 0,
+        "seconds": 1.420907117999377,
+        "chamfer_mm": 0.18666882845923966,
+        "p95_mm": 0.3566940987257558,
+        "iou": 0.8819959541469993,
+        "watertight": true,
+        "components": 1,
+        "n_params": 100227,
+        "depth": 9,
+        "readback": {
+          "family": "flange",
+          "thickness_err": 0.002031862735748291,
+          "z_bottom_err": 0.019912888761609793,
+          "n_holes": 1,
+          "n_holes_gt": 1,
+          "main_hole_diameter_err": 0.24912087475281552,
+          "main_hole_center_err": 0.07942467923847162
+        }
+      },
+      "retrain": {
+        "gradient_steps": 3000,
+        "seconds": 14.189042324999718,
+        "chamfer_mm": 0.19987886713829833,
+        "p95_mm": 0.3663856596270456,
+        "iou": 0.922492200887561,
+        "watertight": true,
+        "components": 1,
+        "n_params": 8641,
+        "depth": 4,
+        "readback": {
+          "family": "flange",
+          "thickness_err": 0.014337807893753052,
+          "z_bottom_err": 0.012511660810559988,
+          "n_holes": 1,
+          "n_holes_gt": 1,
+          "main_hole_diameter_err": 0.012438639979482247,
+          "main_hole_center_err": 0.009073455042504397
+        }
+      }
+    }
+  }
+]

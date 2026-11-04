@@ -1,0 +1,191 @@
+{
+  "format": "wsp-patch/1",
+  "base_sha256": "e39fcd0fff43bdd20eb3588747708056556e4b4d26869ff50b6f33a3c9e6510a",
+  "patched_sha256": "6b7de67da981f32da658bbd3eadbb9ad8e4dfe54e59daf668e93b94c1303e2cf",
+  "params": [
+    {
+      "name": "fuse.weight",
+      "shape": [
+        64,
+        64
+      ],
+      "n_changed": 64
+    },
+    {
+      "name": "fuse.bias",
+      "shape": [
+        64
+      ],
+      "n_changed": 1
+    },
+    {
+      "name": "cls.weight",
+      "shape": [
+        4,
+        64
+      ],
+      "n_changed": 4
+    }
+  ],
+  "changed_fraction": 0.009092106996969298,
+  "history": [
+    {
+      "step": 0,
+      "op": "set",
+      "param": "fuse.weight",
+      "index": "3, 0:32",
+      "reason": "route existing tolerance detector (aux_tol direction) into fusion unit: disconnect geometry inputs of unit 3",
+      "n_changed": 32,
+      "delta_l2": 0.39781848783483015,
+      "rel_change": 0.0416491463504703,
+      "timestamp": 1793811895.18067
+    },
+    {
+      "step": 1,
+      "op": "set",
+      "param": "fuse.weight",
+      "index": "3, 32:64",
+      "reason": "route existing tolerance detector (aux_tol direction) into fusion unit: text inputs = aux_tol.weight",
+      "n_changed": 32,
+      "delta_l2": 2.322429121099352,
+      "rel_change": 0.24335518985295485,
+      "timestamp": 1793811895.1818118
+    },
+    {
+      "step": 2,
+      "op": "set",
+      "param": "fuse.bias",
+      "index": "3",
+      "reason": "route existing tolerance detector (aux_tol direction) into fusion unit: bias = aux_tol.bias, so unit = relu(tolerance logit)",
+      "n_changed": 1,
+      "delta_l2": 0.0010338276624679565,
+      "rel_change": 0.0012686678323155043,
+      "timestamp": 1793811895.1826384
+    },
+    {
+      "step": 3,
+      "op": "set",
+      "param": "cls.weight",
+      "index": ":, 3",
+      "reason": "clear previous outgoing weights of the repurposed unit",
+      "n_changed": 4,
+      "delta_l2": 0.17464553511768596,
+      "rel_change": 0.05064407571677737,
+      "timestamp": 1793811895.183438
+    },
+    {
+      "step": 4,
+      "op": "set",
+      "param": "cls.weight",
+      "index": "1, 3",
+      "reason": "tolerance unit → +α on リーマ logit",
+      "n_changed": 1,
+      "delta_l2": 0.25,
+      "rel_change": 0.07258866854585312,
+      "timestamp": 1793811895.1860683
+    },
+    {
+      "step": 5,
+      "op": "set",
+      "param": "cls.weight",
+      "index": "0, 3",
+      "reason": "tolerance unit → −α on キリ logit",
+      "n_changed": 1,
+      "delta_l2": 0.25,
+      "rel_change": 0.07239818197397646,
+      "timestamp": 1793811895.1870039
+    },
+    {
+      "step": 6,
+      "op": "set",
+      "param": "cls.weight",
+      "index": "1, 3",
+      "reason": "tolerance unit → +α on リーマ logit",
+      "n_changed": 1,
+      "delta_l2": 0.25,
+      "rel_change": 0.07220918719407397,
+      "timestamp": 1793811895.1939888
+    },
+    {
+      "step": 7,
+      "op": "set",
+      "param": "cls.weight",
+      "index": "0, 3",
+      "reason": "tolerance unit → −α on キリ logit",
+      "n_changed": 1,
+      "delta_l2": 0.25,
+      "rel_change": 0.07165096164508285,
+      "timestamp": 1793811895.195036
+    },
+    {
+      "step": 8,
+      "op": "set",
+      "param": "cls.weight",
+      "index": "1, 3",
+      "reason": "tolerance unit → +α on リーマ logit",
+      "n_changed": 1,
+      "delta_l2": 0.5,
+      "rel_change": 0.1422109709492914,
+      "timestamp": 1793811895.2022746
+    },
+    {
+      "step": 9,
+      "op": "set",
+      "param": "cls.weight",
+      "index": "0, 3",
+      "reason": "tolerance unit → −α on キリ logit",
+      "n_changed": 1,
+      "delta_l2": 0.5,
+      "rel_change": 0.13808375030969697,
+      "timestamp": 1793811895.2032704
+    },
+    {
+      "step": 10,
+      "op": "set",
+      "param": "cls.weight",
+      "index": "1, 3",
+      "reason": "tolerance unit → +α on リーマ logit",
+      "n_changed": 1,
+      "delta_l2": 1.0,
+      "rel_change": 0.2685923949103489,
+      "timestamp": 1793811895.210907
+    },
+    {
+      "step": 11,
+      "op": "set",
+      "param": "cls.weight",
+      "index": "0, 3",
+      "reason": "tolerance unit → −α on キリ logit",
+      "n_changed": 1,
+      "delta_l2": 1.0,
+      "rel_change": 0.24352913807984375,
+      "timestamp": 1793811895.2119608
+    },
+    {
+      "step": 12,
+      "op": "set",
+      "param": "cls.weight",
+      "index": "1, 3",
+      "reason": "tolerance unit → +α on リーマ logit",
+      "n_changed": 1,
+      "delta_l2": 2.0,
+      "rel_change": 0.44876931521718466,
+      "timestamp": 1793811895.2191641
+    },
+    {
+      "step": 13,
+      "op": "set",
+      "param": "cls.weight",
+      "index": "0, 3",
+      "reason": "tolerance unit → −α on キリ logit",
+      "n_changed": 1,
+      "delta_l2": 2.0,
+      "rel_change": 0.35432057824026836,
+      "timestamp": 1793811895.220123
+    }
+  ],
+  "metadata": {
+    "seed": 2,
+    "method": "wsp_route"
+  }
+}

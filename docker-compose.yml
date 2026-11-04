@@ -1,0 +1,44 @@
+# Services
+#   wsp          – experiments with the offline scripted agent (default: all)
+#   closed-net   – the same with networking disabled: simulates a customer's closed network
+#                  (閉域網). Everything except the Claude agent works without network access.
+#   claude       – experiments driven by Claude (needs ANTHROPIC_API_KEY and network access)
+#   tests        – pytest
+#
+#   docker compose build
+#   docker compose run --rm closed-net exp3
+#   ANTHROPIC_API_KEY=... docker compose run --rm claude exp1 --agent claude
+x-common: &common
+  build: .
+  image: weight-space-programming:latest
+  volumes:
+    - ./results:/app/results
+    - ./artifacts:/app/artifacts
+  # Resource caps comparable to a modest on-prem inference box.
+  cpus: 4
+  mem_limit: 8g
+
+services:
+  wsp:
+    <<: *common
+    command: ["all"]
+
+  closed-net:
+    <<: *common
+    network_mode: none
+    read_only: true
+    tmpfs:
+      - /tmp
+    command: ["all"]
+
+  claude:
+    <<: *common
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}  # required for --agent claude
+      WSP_CLAUDE_MODEL: ${WSP_CLAUDE_MODEL:-claude-opus-5-5}
+    command: ["exp1", "--agent", "claude"]
+
+  tests:
+    <<: *common
+    entrypoint: ["pytest"]
+    command: ["-q"]

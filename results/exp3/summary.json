@@ -1,0 +1,154 @@
+{
+  "experiment": "exp3_fix_tolerance_bias",
+  "agent": "scripted",
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "aggregate": {
+    "before": {
+      "A_accuracy": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "B_accuracy": {
+        "mean": 0.831166684627533,
+        "std": 0.03950596848730824
+      },
+      "B_ream_recall": {
+        "mean": 0.3469334243922954,
+        "std": 0.16145303961569485
+      },
+      "B_drill_precision": {
+        "mean": 0.7031152043962795,
+        "std": 0.051683009412474605
+      },
+      "A_ream_recall": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "changed_fraction": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "gradient_steps": 0.0
+    },
+    "wsp_route": {
+      "A_accuracy": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "B_accuracy": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "B_ream_recall": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "B_drill_precision": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "A_ream_recall": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "changed_fraction": {
+        "mean": 0.009092106996969298,
+        "std": 0.0
+      },
+      "gradient_steps": 0.0
+    },
+    "wsp_route_ablate": {
+      "A_accuracy": {
+        "mean": 0.8334999879201254,
+        "std": 0.005656837615536168
+      },
+      "B_accuracy": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "B_ream_recall": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "B_drill_precision": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "A_ream_recall": {
+        "mean": 0.35913304205491964,
+        "std": 0.02349983096739616
+      },
+      "changed_fraction": {
+        "mean": 0.01752536566082488,
+        "std": 0.0
+      },
+      "gradient_steps": 0.0
+    },
+    "ft_head": {
+      "A_accuracy": {
+        "mean": 0.9994999965031942,
+        "std": 0.0007071117264167728
+      },
+      "B_accuracy": {
+        "mean": 0.9945000012715658,
+        "std": 0.007778172794786486
+      },
+      "B_ream_recall": {
+        "mean": 0.9786821705426356,
+        "std": 0.03014796353896133
+      },
+      "B_drill_precision": {
+        "mean": 0.9866017052375152,
+        "std": 0.018948050165778375
+      },
+      "A_ream_recall": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "changed_fraction": {
+        "mean": 0.028945403434795975,
+        "std": 0.0010989586685287303
+      },
+      "gradient_steps": 200.0
+    },
+    "ft_all": {
+      "A_accuracy": {
+        "mean": 0.9985000093777975,
+        "std": 0.0021213070813513113
+      },
+      "B_accuracy": {
+        "mean": 0.9955000082651774,
+        "std": 0.006363949341952941
+      },
+      "B_ream_recall": {
+        "mean": 0.9838501291989664,
+        "std": 0.022839366317394937
+      },
+      "B_drill_precision": {
+        "mean": 0.9897246198109331,
+        "std": 0.014531582021918373
+      },
+      "A_ream_recall": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "changed_fraction": {
+        "mean": 0.699038081433654,
+        "std": 0.01635253953187322
+      },
+      "gradient_steps": 200.0
+    }
+  },
+  "env": {
+    "python": "3.13.18",
+    "torch": "2.15.0+cu132",
+    "numpy": "2.5.4",
+    "platform": "Linux-6.18.44-fc-v233-x86_64-with-glibc2.39",
+    "torch_threads": 4,
+    "timestamp": "2026-11-04T17:04:56+0000"
+  }
+}

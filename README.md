@@ -1,5 +1,131 @@
 # weight-space-programming
 
+LLM がニューラルネットワークの**重みを「読めるソースコード」として Read / Fix / Write する**
+Weight-Space Programming（重み空間プログラミング）を、製造業の課題 — 3D CAD 部品の陰関数表現（SDF）と
+図面の穴指示分類 — に置き換えて検証するためのハーネスと実験です。勾配降下を 1 ステップも使わずに、
+重みの読解・設計変更の反映・不具合のホットフィックスを行い、CAD の正解と定量比較します。
+
+> **結果の位置づけ**: 下記の数値はすべて、LLM と**同じツールだけ**を使う決定的な参照エージェント
+> （`--agent scripted`）によるものです。Claude をエージェントにするループ（`--agent claude`）は実装・単体テスト済み
+> ですが、API キーを使った実行結果はまだ含みません。データはすべて合成です。
+
+## クイックスタート
+
+```bash
+uv sync --extra llm      # Python 3.11+ / uv。CPU のみで動作
+uv run pytest -q         # 49 テスト（約 1 分、ネットワーク・API キー不要）
+uv run wsp all           # 3 実験を実行し results/ に書き出す（CPU で約 10 分。初回は SDF ネットワークのフィットを含む）
+```
+
+```bash
+uv run wsp exp3 --agent claude --seeds 0    # Claude（claude-opus-5-5）をエージェントにする。認証情報が必要で API 課金が発生
+```
+
+```bash
+docker compose run --rm closed-net all      # ネットワーク無効のコンテナ（閉域網想定）で実行
+```
+
+## 実験結果サマリー
+
+詳細は [results/exp1](results/exp1/README.md)・[results/exp2](results/exp2/README.md)・[results/exp3](results/exp3/README.md)。
+
+### Exp1 【Read】SDF-MLP の重みから 3D 部品の形状と設計意図を読む
+
+5 種（平板・貫通穴・止まり穴・ザグリ穴・フランジ）× 2 部品。各部品を ReLU MLP（3×64、8,641 パラメータ）にフィットし、
+エージェントには**重みとモデルカードだけ**を渡す。エージェントはサンドボックスで重み行列から順伝播を再実装して読解する。
+
+| 指標 | 結果 |
+|---|---|
+| 部品種別の正解率 / 穴数の正解率 / 貫通・止まりの判定 | **100%** / 100% / 100% |
+| 外形寸法 X / Y の平均絶対誤差 | 0.03 mm / 0.02 mm |
+| 板厚 / 下面 Z | 0.04 mm / 0.03 mm |
+| 穴中心 / 穴半径 | 0.15 mm / 0.26 mm（最大はザグリ下の短い穴区間で 0.96 mm） |
+| 止まり穴深さ / ザグリ半径 / ザグリ深さ | 0.13 mm / 0.05 mm / 0.15 mm |
+
+### Exp2 【Write / Edit】設計変更指示（ECN）を再学習なしで重みに反映
+
+7 件の ECN（README の例「中心の穴の直径を2倍に広げ、Z軸方向に+5mmオフセットせよ」を含む）。移動・板厚・肉盛りは
+第 1 層 / 最終層の閉形式の重み編集、穴の追加・拡大・縮小は**厳密な ReLU 部分ネットワーク（正 64 角柱）を書き込んで CSG 合成**。
+変更後の部品の解析 CAD に対する平均値:
+
+| 手法 | Chamfer 距離 | P95 | IoU | 水密 | 勾配ステップ |
+|---|---:|---:|---:|---:|---:|
+| 編集なし（変更の大きさの参考） | 1.375 mm | 3.51 mm | 0.697 | 100% | 0 |
+| **wsp_edit**（顧客ネットワークを重み空間で編集） | **0.215 mm** | 0.41 mm | 0.914 | 100% | **0** |
+| write_from_read（重みから仕様を読み、ネットワークを解析的に書き直す） | 0.209 mm | 0.40 mm | 0.900 | 100% | 0 |
+| retrain（変更後 CAD で再学習。現場では通常不可） | 0.220 mm | 0.42 mm | 0.909 | 100% | 3,000 |
+
+### Exp3 【Fix】はめあい公差を無視する図面穴分類器のホットフィックス
+
+テナント A（リーマ穴を太線で描き、公差は別表のことが多い）で学習した分類器が、テナント B（線幅一律・公差は常に併記）で
+「φ10H7」のリーマ穴をキリ穴と誤分類する。B のラベル付き 16 件と順伝播予算 3,000 回だけで、重みを直接修正する（3 シード、平均 ± 標準偏差）。
+
+| 手法 | B 正解率 | B リーマ再現率 | A 正解率（回帰チェック） | 変更した重み | 勾配ステップ |
+|---|---:|---:|---:|---:|---:|
+| 修正前 | 83.1% ± 4.0% | 34.7% ± 16.1% | 100.0% | 0 | 0 |
+| **wsp_route**（休眠ユニットに公差検出器を配線） | **100.0%** | **100.0%** | **100.0%** | 69 / 7,589（0.91%） | **0** |
+| wsp_route_ablate（＋線幅入力を切除） | 100.0% | 100.0% | 83.3% ± 0.6% | 1.75% | 0 |
+| 分類ヘッドのみ少数ショット微調整 | 99.5% ± 0.8% | 97.9% ± 3.0% | 99.9% ± 0.1% | 2.89% | 200 |
+| 全重み少数ショット微調整 | 99.6% ± 0.6% | 98.4% ± 2.3% | 99.9% ± 0.2% | 69.9% | 200 |
+
+### 主な知見
+
+1. **「能力はあるが使われていない」なら重み編集で直せる。** Exp3 では、誤分類された B のリーマ穴でも補助ヘッド（公差検出器）は
+   強く発火しており、線幅だけを A の値に変えると 3/3 がリーマに反転した（＝作図テンプレートへのショートカット）。休眠ユニット 1 個に
+   検出器の重みを写して配線するだけで B は 100%、公差指示のない入力の予測は構成上不変なので A の回帰はゼロ。
+2. **新しい能力は書けない。** 学習時に一度も出現しない公差コード（F7 / JS7）には検出器が反応せず、エージェントは「再配線では直せない」と報告する。
+   論文報道の結論（ボトルネック除去には有効、ゼロからの能力付与は困難）と整合する。
+3. **同じドメインルールがテナントによって正しくも誤りにもなる。** 線幅を切除すると B は直るが A が 83% に落ちる。修正はテナント単位の
+   パッチ（疎な差分 + 適用先ハッシュ + 理由付き履歴、[`results/exp3/patches/`](results/exp3/patches)）として管理すべき。
+4. **「書いたら読む」が必須。** 学習済み SDF は真の距離場ではない（フランジ内径で `|∇f| ≈ 0.31`）。0.5 mm 肉盛りを最終層バイアス
+   1 つで行うと、再読解した内径は Ø15.77 → Ø12.34 mm（期待値 Ø14.77）と約 3 倍縮んだ。エージェントは期待寸法との差を検出して
+   その穴だけを CSG で再加工し、最終的な内径誤差は 0.23 mm（元の読解誤差と同程度）になった。
+5. **少数ショット微調整も十分強い。** この規模では勾配でもほぼ直る。WSP の優位は精度よりも、変更の小ささ・説明可能性・回帰しないことの
+   構成的な保証・GPU や学習基盤が不要な点にある。使い分けは [docs/industrial_application_notes.md](docs/industrial_application_notes.md)。
+
+## 実装構成
+
+```text
+weight-space-programming/
+├── README.md / AGENTS.md / CLAUDE.md        # 概要 / AI エージェント向け作業指示（CLAUDE.md は AGENTS.md を読み込む）
+├── pyproject.toml / uv.lock                 # uv による依存管理（`wsp` コマンド）
+├── Dockerfile / docker-compose.yml          # CPU 版 PyTorch の再現環境、closed-net（network_mode: none）
+├── src/wsp/
+│   ├── harness/                             # LLM が重みを Read/Fix/Write するための安全なツール群
+│   │   ├── inspector.py                     # 統計・SVD・スライス・活性計測（順伝播予算つき）
+│   │   ├── editor.py                        # トランザクション編集（ロールバック、ガードレール、監査ログ、ハッシュ付きパッチ）
+│   │   ├── sandbox.py, _sandbox_worker.py   # 別プロセスの Python サンドボックス（AST 検査・rlimit・最小環境変数）
+│   │   └── tools.py                         # Pydantic で型付けしたツール → Claude API の tools スキーマ
+│   ├── geometry/                            # parts.py（部品と解析 SDF）, mesh.py（評価指標）, sdf_ops.py（厳密な重み演算）
+│   ├── models/                              # cad_sdf_mlp.py（3D 部品の Implicit MLP）, drawing_head.py（図面穴の多モーダル分類器）
+│   ├── data/drawings.py                     # テナント A/B の合成穴指示データとトークナイザ
+│   ├── agents/                              # llm.py（Claude ツールループ）, scripted.py（参照エージェント）, prompts.py, snippets/
+│   └── experiments/                         # exp1_read_3d_semantics.py, exp2_write_ecn_edit.py, exp3_fix_tolerance_bias.py
+├── tests/                                   # pytest（ネットワーク・API キー不要。LLM ループはフェイククライアントで検証）
+├── results/                                 # `uv run wsp all` の出力（summary.json / cases.json / README.md / パッチ）
+└── docs/
+    ├── architecture.md                      # ハーネス設計・重み演算の数学・セキュリティモデル・パッチ形式
+    └── industrial_application_notes.md      # 自動車 OEM/Tier1（閉域網・テナント分離・少数データ）への適用考察
+```
+
+- **Claude エージェント**: 公式 Anthropic Python SDK、既定モデル `claude-opus-5-5`（`--model` / `WSP_CLAUDE_MODEL` で変更可）。
+  effort は `output_config` で指定、`system`・`tools` を固定して追記のみの会話にすることでプロンプトキャッシュを効かせ、
+  拒否時のサーバー側フォールバック（`fallbacks="default"`）を既定で有効にしている（不要なら `ClaudeAgent(use_fallbacks=False)`）。
+- **AI エージェント向け設定**: [AGENTS.md](AGENTS.md)（正本）、[CLAUDE.md](CLAUDE.md)（`@AGENTS.md` を読み込み）、
+  [.github/copilot-instructions.md](.github/copilot-instructions.md)。CI は [.github/workflows/ci.yml](.github/workflows/ci.yml)。
+
+## 論文情報の確認状況（2026-11-04 時点）
+
+- 『Sparks of Weight-Space Programming: LLMs can natively read & write neural network weights』（Rikiya Takehi, Jayden Teoh,
+  Alex Zhang, Omar Khattab、2026-11-02 公開）の存在、GPT-6 Astra の使用、Qwen3.5-0.8B の MATH-500 が 7.9% → 48.1%
+  （約 6 倍、重みの約 0.016% を変更）という数値は、**Web 検索で得た二次報道**（DataCamp, Analytics India Magazine, VentureBeat ほか）で確認した。
+- 論文本文（一次資料）は、この作業環境のネットワーク制限により取得できず**未確認**。本リポジトリは論文のコードやデータを使っておらず、
+  実験設計は下記の計画に基づく独自の再構成である。
+
+---
+
+# 背景と設計方針（当初の計画）
+
 Weight-Space Programming（重み空間プログラミング）は、2026年11月2日にMIT CSAIL（Rikiya Takehi氏、Jayden Teoh氏、Alex Zhang氏、Omar Khattab氏）が発表した技術報告『Sparks of Weight-Space Programming』で提唱されたパラダイムです。
 
 従来のように「学習データと勾配降下法」を介してニューラルネットワークの重みを更新するのではなく、**汎用LLM（論文ではGPT-6 Astraを使用）がターゲットモデルの生の重み（またはPythonサンドボックス経由で調査した重み統計・Attentionパターン）を「読めるソースコード」のように推論・解釈し、訓練ループを一切回さずに直接重みを読み書き・修正する**手法を指します。
@@ -102,28 +228,21 @@ FDEやMLEが顧客環境（データが少ない、再学習環境がない閉�
 
 ---
 
-## 5. リポジトリのディレクトリ構成イメージ
+## 5. リポジトリのディレクトリ構成イメージ（→ 実装との対応）
 
-```text
-weight-space-programming/
-├── README.md                  # 概要、MIT論文の要点、製造業・3D/図面ドメインへの応用仮説、実験結果のサマリー
-├── docker-compose.yml         # 再現可能な実行環境
-├── pyproject.toml             # uv / poetry 等によるモダンな依存管理
-├── src/
-│   ├── harness/               # LLMが重みをRead/Fix/Writeするための安全なPythonサンドボックス＆ツール群
-│   │   ├── inspector.py       # 重みの統計量、SVD、アクティベーション計測ツール
-│   │   └── editor.py          # テンソルの特定スライス・ヘッドを書き換えるトランザクション処理（Rollback機能付き）
-│   ├── models/
-│   │   ├── cad_sdf_mlp.py     # 3D機械部品（穴・フランジ等）を表現するImplicit MLP
-│   │   └── drawing_head.py    # 図面要素（形状＋公差テキスト）のマルチモーダル分類モデル
-│   └── experiments/
-│       ├── exp1_read_3d_semantics.py   # 重みから3D部品の穴径・設計意図を当てる検証
-│       ├── exp2_write_ecn_edit.py      # 設計変更指示から再学習なしで3D重みを書き換える検証
-│       └── exp3_fix_tolerance_bias.py  # はめあい公差の見落としバグを重み直接編集で直す検証
-└── docs/
-    └── industrial_application_notes.md # 自動車OEM/Tier1環境（閉域網・テナント分離・少数データ）への適用考察
+当初の構成イメージは、パッケージ名 `wsp` の下に次のように実装しました（全体は上の「実装構成」を参照）。
 
-```
+| 当初のイメージ | 実装 |
+| --- | --- |
+| `src/harness/inspector.py` | `src/wsp/harness/inspector.py`（＋ `sandbox.py`, `tools.py`） |
+| `src/harness/editor.py` | `src/wsp/harness/editor.py`（トランザクション・ロールバック・パッチ出力） |
+| `src/models/cad_sdf_mlp.py` | `src/wsp/models/cad_sdf_mlp.py`（＋ `src/wsp/geometry/`） |
+| `src/models/drawing_head.py` | `src/wsp/models/drawing_head.py`（＋ `src/wsp/data/drawings.py`） |
+| `src/experiments/exp1_read_3d_semantics.py` | `src/wsp/experiments/exp1_read_3d_semantics.py` |
+| `src/experiments/exp2_write_ecn_edit.py` | `src/wsp/experiments/exp2_write_ecn_edit.py` |
+| `src/experiments/exp3_fix_tolerance_bias.py` | `src/wsp/experiments/exp3_fix_tolerance_bias.py` |
+| `docs/industrial_application_notes.md` | `docs/industrial_application_notes.md` |
+| `docker-compose.yml`, `pyproject.toml` | 同名ファイル（＋ `Dockerfile`, `uv.lock`） |
 
 まずは最小構成として、PyTorchで数千パラメータ程度の小さなモデル（2D/3Dの幾何形状を表すMLPや、図面特徴量のシンプルな分類器）を用意し、LLMが `state_dict()` の中身を検査用関数で調査して特定の重みを書き換える **「ハーネス（`inspector.py` と `editor.py`）」** から着手するのが最も進めやすいアプローチです。
 
